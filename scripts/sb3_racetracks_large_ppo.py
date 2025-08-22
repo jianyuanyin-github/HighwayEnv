@@ -7,12 +7,12 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 import highway_env  # noqa: F401
 
 
-TRAIN = False
+TRAIN = True
 
 if __name__ == "__main__":
     n_cpu = 6
     batch_size = 64
-    env = make_vec_env("racetrack-v0", n_envs=n_cpu, vec_env_cls=SubprocVecEnv)
+    env = make_vec_env("racetrack-large-v0", n_envs=n_cpu, vec_env_cls=SubprocVecEnv)
     model = PPO(
         "MlpPolicy",
         env,
@@ -23,20 +23,20 @@ if __name__ == "__main__":
         learning_rate=5e-4,
         gamma=0.9,
         verbose=2,
-        tensorboard_log="racetrack_ppo/",
+        tensorboard_log="racetrack_large_ppo/",
     )
     # Train the model
     if TRAIN:
         model.learn(total_timesteps=int(1e5))
-        model.save("racetrack_ppo/model")
+        model.save("racetrack_large_ppo/model")
         del model
 
     # Run the algorithm
-    model = PPO.load("racetrack_ppo/model", env=env)
+    model = PPO.load("racetrack_large_ppo/model", env=env)
 
-    env = gym.make("racetrack-v0", render_mode="rgb_array")
+    env = gym.make("racetrack-large-v0", render_mode="rgb_array")
     env = RecordVideo(
-        env, video_folder="racetrack_ppo/videos", episode_trigger=lambda e: True
+        env, video_folder="racetrack_large_ppo/videos", episode_trigger=lambda e: True
     )
     env.unwrapped.set_record_video_wrapper(env)
 
