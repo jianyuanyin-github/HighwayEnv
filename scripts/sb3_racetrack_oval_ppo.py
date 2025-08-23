@@ -5,11 +5,15 @@ from gymnasium.wrappers import RecordVideo
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 import highway_env  # noqa: F401
 
 
 TRAIN = True
+CONTINUE_TRAINING = (
+    False  # True: continue training from existing model, False: train from scratch
+)
 
 # env configuration
 config = {
@@ -59,25 +63,70 @@ config = {
 
 
 if __name__ == "__main__":
-    n_cpu = 8
-    batch_size = 32
+    # GPU optimization configuration
+    import torch
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    n_envs = 8  # Number of parallel environments
+    batch_size = 256  # Increase batch size to utilize GPU better
 
     def make_env():
         return gym.make("racetrack-oval-v0", config=config)
 
-    env = make_vec_env(make_env, n_envs=n_cpu, vec_env_cls=SubprocVecEnv)
-    model = PPO(
-        "MlpPolicy",
-        env,
-        policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
-        n_steps=batch_size * 12 // n_cpu,
-        batch_size=batch_size,
-        verbose=2,
-        tensorboard_log="racetrack_oval_ppo/",
-    )
+    env = make_vec_env(make_env, n_envs=n_envs, vec_env_cls=SubprocVecEnv)
+
+    # Decide whether to continue training based on configuration
+    if CONTINUE_TRAINING:
+        try:
+            model = PPO.load(
+                "racetrack_oval_ppo/model",
+                env=env,
+                tensorboard_log="racetrack_oval_ppo/",
+            )
+            print("✓ Loaded existing model, continuing training...")
+        except Exception as e:
+            print(f"✗ Cannot load existing model: {e}")
+            print("✓ Creating new model to start training...")
+            model = PPO(
+                "MlpPolicy",
+                env,
+                policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
+                n_steps=batch_size * 12 // n_envs,
+                batch_size=batch_size,
+                n_epochs=10,
+                learning_rate=5e-4,
+                gamma=0.9,
+                verbose=2,
+                device=device,  # Use GPU
+                tensorboard_log="racetrack_oval_ppo/",
+            )
+    else:
+        print("✓ Creating new model, training from scratch...")
+        model = PPO(
+            "MlpPolicy",
+            env,
+            policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
+            n_steps=batch_size * 12 // n_envs,
+            batch_size=batch_size,
+            n_epochs=10,
+            learning_rate=5e-4,
+            gamma=0.9,
+            verbose=2,
+            device=device,  # Use GPU
+            tensorboard_log="racetrack_oval_ppo/",
+        )
     # Train the model
     if TRAIN:
-        model.learn(total_timesteps=int(1e3))
+        # Save checkpoint
+        checkpoint_callback = CheckpointCallback(
+            save_freq=100000,
+            save_path="./racetrack_oval_ppo/checkpoints/",
+            name_prefix="rl_model",
+        )
+
+        model.learn(total_timesteps=int(1e5), callback=checkpoint_callback)
         model.save("racetrack_oval_ppo/model")
         del model
 
