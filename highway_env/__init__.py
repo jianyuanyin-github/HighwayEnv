@@ -102,6 +102,10 @@ def _register_highway_envs():
         entry_point="highway_env.envs.racetrack_env:RacetrackEnvLarge",
     )
     register(
+        id="racetrack-large-single-v0",
+        entry_point="highway_env.envs.racetrack_env:RacetrackEnvLarge",
+    )
+    register(
         id="racetrack-oval-v0",
         entry_point="highway_env.envs.racetrack_env:RacetrackEnvOval",
     )
