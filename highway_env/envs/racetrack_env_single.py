@@ -364,7 +364,7 @@ class RacetrackEnvSingle(AbstractEnv):
         self.controlled_vehicles = []
         for i in range(self.config["controlled_vehicles"]):
             lane_index = (
-                ("a", "b", rng.integers(2))
+                ("a", "b", 0)
                 if i == 0
                 else self.road.network.random_lane_index(rng)
             )
