@@ -126,5 +126,11 @@ def _register_highway_envs():
     # u_turn_env.py
     register(id="u-turn-v0", entry_point="highway_env.envs.u_turn_env:UTurnEnv")
 
+    # complex_racetrack_env.py
+    register(
+        id="racetrack-single-v0",
+        entry_point="highway_env.envs.racetrack_env_single:RacetrackEnvSingle",
+    )
+
 
 _register_highway_envs()
