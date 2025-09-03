@@ -4,6 +4,7 @@ import copy
 
 import numpy as np
 
+from highway_env import utils
 from highway_env.envs.common.abstract import AbstractEnv
 from highway_env.road.lane import LineType, SineLane, StraightLane
 from highway_env.road.road import Road, RoadNetwork
@@ -13,13 +14,14 @@ from highway_env.vehicle.dynamics import BicycleVehicle
 class LaneKeepingEnv(AbstractEnv):
     """A lane keeping control task."""
 
-    def __init__(self, config: dict = None) -> None:
-        super().__init__(config)
+    def __init__(self, config: dict = None, render_mode: str | None = None) -> None:
+        super().__init__(config, render_mode)
         self.lane = None
         self.lanes = []
         self.trajectory = []
         self.interval_trajectory = []
         self.lpv = None
+        self.episode_length = 0
 
     @classmethod
     def default_config(cls) -> dict:
@@ -33,18 +35,25 @@ class LaneKeepingEnv(AbstractEnv):
                 "action": {
                     "type": "ContinuousAction",
                     "steering_range": [-np.pi / 3, np.pi / 3],
-                    "longitudinal": False,
+                    "longitudinal": True,
                     "lateral": True,
                     "dynamical": True,
                 },
-                "simulation_frequency": 10,
-                "policy_frequency": 10,
+                "simulation_frequency": 15,
+                "policy_frequency": 15,
                 "state_noise": 0.05,
                 "derivative_noise": 0.05,
                 "screen_width": 600,
                 "screen_height": 250,
                 "scaling": 7,
                 "centering_position": [0.4, 0.5],
+                "duration": 120,  # Episode duration in seconds
+                "collision_reward": -1,
+                "lane_centering_cost": 4,
+                "lane_centering_reward": 1,
+                "progress_reward": 0.3,
+                "speed_reward": 0.2,
+                "speed_limit": 8.3,
             }
         )
         return config
@@ -63,6 +72,9 @@ class LaneKeepingEnv(AbstractEnv):
         obs = self.observation_type.observe()
         self._simulate()
 
+        # Increment episode length
+        self.episode_length += 1
+
         info = {}
         reward = self._reward(action)
         terminated = self._is_terminated()
@@ -70,16 +82,50 @@ class LaneKeepingEnv(AbstractEnv):
         return obs, reward, terminated, truncated, info
 
     def _reward(self, action: np.ndarray) -> float:
-        _, lat = self.lane.local_coordinates(self.vehicle.position)
-        return 1 - (lat / self.lane.width) ** 2
+        rewards = self._rewards(action)
+        reward = sum(
+            self.config.get(name, 0) * reward for name, reward in rewards.items()
+        )
+        reward = utils.lmap(reward, [self.config["collision_reward"], 1], [0, 1])
+        reward *= rewards["on_road_reward"]
+        return reward
+
+    def _rewards(self, action: np.ndarray) -> dict[str, float]:
+        _, lateral = self.lane.local_coordinates(self.vehicle.position)
+
+        # Progress reward based on forward speed along the lane
+        longitudinal_speed = self.vehicle.speed * np.cos(
+            self.vehicle.heading
+            - self.lane.heading_at(
+                self.lane.local_coordinates(self.vehicle.position)[0]
+            )
+        )
+        progress_reward = max(0, longitudinal_speed / self.config["speed_limit"])
+
+        # Speed reward - encourage maintaining target speed
+        target_speed = self.config["speed_limit"] * 0.8
+        speed_diff = abs(self.vehicle.speed - target_speed)
+        speed_reward = max(0, 1 - speed_diff / target_speed)
+
+        return {
+            "lane_centering_reward": 1
+            / (1 + self.config["lane_centering_cost"] * lateral**2),
+            "progress_reward": progress_reward,
+            "speed_reward": speed_reward,
+            "collision_reward": self.vehicle.crashed,
+            "on_road_reward": self.vehicle.on_road,
+        }
 
     def _is_terminated(self) -> bool:
         return False
 
     def _is_truncated(self) -> bool:
-        return False
+        # Truncate after specified duration (duration * frequency = number of steps)
+        max_steps = self.config["duration"] * self.config["simulation_frequency"]
+        return self.episode_length >= max_steps
 
     def _reset(self) -> None:
+        self.episode_length = 0
         self._make_road()
         self._make_vehicles()
 
@@ -92,13 +138,13 @@ class LaneKeepingEnv(AbstractEnv):
             pulsation=2 * np.pi / 100,
             phase=0,
             width=10,
-            line_types=[LineType.STRIPED, LineType.STRIPED],
+            line_types=[LineType.CONTINUOUS, LineType.CONTINUOUS],
         )
         net.add_lane("a", "b", lane)
         other_lane = StraightLane(
             [50, 50],
             [115, 15],
-            line_types=(LineType.STRIPED, LineType.STRIPED),
+            line_types=(LineType.CONTINUOUS, LineType.CONTINUOUS),
             width=10,
         )
         net.add_lane("c", "d", other_lane)
@@ -110,7 +156,7 @@ class LaneKeepingEnv(AbstractEnv):
             StraightLane(
                 [115, 15],
                 [115 + 20, 15 + 20 * (15 - 50) / (115 - 50)],
-                line_types=(LineType.NONE, LineType.STRIPED),
+                line_types=(LineType.NONE, LineType.CONTINUOUS),
                 width=10,
             ),
         )
@@ -125,7 +171,7 @@ class LaneKeepingEnv(AbstractEnv):
         road = self.road
         ego_vehicle = self.action_type.vehicle_class(
             road,
-            road.network.get_lane(("c", "d", 0)).position(50, -4),
+            road.network.get_lane(("c", "d", 0)).position(50, 0),
             heading=road.network.get_lane(("c", "d", 0)).heading_at(0),
             speed=8.3,
         )

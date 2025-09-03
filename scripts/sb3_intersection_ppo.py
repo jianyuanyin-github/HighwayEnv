@@ -4,15 +4,86 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
+import numpy as np
 
 import highway_env  # noqa: F401
 
 
-TRAIN = False
+class TupleToMultiDiscreteWrapper(gym.Wrapper):
+    """Convert Tuple spaces to supported formats for multi-agent environments."""
+    
+    def __init__(self, env):
+        super().__init__(env)
+        
+        # Handle action space
+        if isinstance(env.action_space, gym.spaces.Tuple):
+            # Convert Tuple(Discrete(n), Discrete(m), ...) to MultiDiscrete([n, m, ...])
+            nvec = [space.n for space in env.action_space.spaces]
+            self.action_space = gym.spaces.MultiDiscrete(nvec)
+            self._tuple_action = True
+        else:
+            self._tuple_action = False
+            
+        # Handle observation space
+        if isinstance(env.observation_space, gym.spaces.Tuple):
+            # Flatten tuple observation to a single Box space
+            total_shape = 0
+            for space in env.observation_space.spaces:
+                if isinstance(space, gym.spaces.Box):
+                    total_shape += np.prod(space.shape)
+                else:
+                    raise NotImplementedError(f"Unsupported space type: {type(space)}")
+            
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(total_shape,), dtype=np.float32
+            )
+            self._tuple_obs = True
+        else:
+            self._tuple_obs = False
+    
+    def step(self, action):
+        if self._tuple_action:
+            # Convert MultiDiscrete action back to tuple for the environment
+            tuple_action = tuple(action)
+            obs, reward, terminated, truncated, info = self.env.step(tuple_action)
+        else:
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            
+        if self._tuple_obs:
+            # Flatten tuple observation
+            obs = self._flatten_obs(obs)
+            
+        # Handle tuple rewards - sum them for multi-agent
+        if isinstance(reward, tuple):
+            reward = sum(reward)
+            
+        # Handle tuple terminated/truncated
+        if isinstance(terminated, tuple):
+            terminated = any(terminated)
+        if isinstance(truncated, tuple):
+            truncated = any(truncated)
+            
+        return obs, reward, terminated, truncated, info
+    
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        if self._tuple_obs:
+            obs = self._flatten_obs(obs)
+        return obs, info
+    
+    def _flatten_obs(self, obs_tuple):
+        """Flatten tuple observation to a single array."""
+        flattened = []
+        for obs in obs_tuple:
+            flattened.append(obs.flatten())
+        return np.concatenate(flattened)
+
+
+TRAIN = True
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
-MODEL_TO_LOAD = "model"  # "latest": load newest model, "model": load model.zip, or specific filename like "model_1234567890"
+MODEL_TO_LOAD = "latest"  # "latest": load newest model, "model": load model.zip, or specific filename like "model_1234567890"
 
 if __name__ == "__main__":
     # GPU optimization configuration
@@ -47,7 +118,13 @@ if __name__ == "__main__":
 
     n_envs = 8  # Number of parallel environments
     batch_size = 256  # Increase batch size to utilize GPU better
-    env = make_vec_env("intersection-v0", n_envs=n_envs, vec_env_cls=SubprocVecEnv)
+    
+    def make_env():
+        env = gym.make("intersection-multi-agent-v1")
+        env = TupleToMultiDiscreteWrapper(env)
+        return env
+    
+    env = make_vec_env(make_env, n_envs=n_envs, vec_env_cls=SubprocVecEnv)
 
     # Decide whether to continue training based on configuration
     if CONTINUE_TRAINING:
@@ -64,11 +141,11 @@ if __name__ == "__main__":
             model = PPO(
                 "MlpPolicy",
                 env,
-                policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
+                policy_kwargs=dict(net_arch=dict(pi=[256, 256], vf=[256, 256])),
                 n_steps=batch_size * 12 // n_envs,
                 batch_size=batch_size,
                 n_epochs=10,
-                learning_rate=5e-4,
+                learning_rate=1e-3,
                 gamma=0.9,
                 verbose=2,
                 device=device,  # Use GPU
@@ -79,7 +156,7 @@ if __name__ == "__main__":
         model = PPO(
             "MlpPolicy",
             env,
-            policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
+            policy_kwargs=dict(net_arch=dict(pi=[256, 256], vf=[256, 256])),
             n_steps=batch_size * 12 // n_envs,
             batch_size=batch_size,
             n_epochs=10,
@@ -105,7 +182,7 @@ if __name__ == "__main__":
             name_prefix="rl_model",
         )
 
-        model.learn(total_timesteps=int(1e6), callback=checkpoint_callback)
+        model.learn(total_timesteps=int(5e5), callback=checkpoint_callback)
 
         # Save model with timestamp to avoid overwriting
         import time
@@ -151,11 +228,12 @@ if __name__ == "__main__":
             print(f"  {m}")
         exit(1)
 
-    env = gym.make("intersection-v0", render_mode="rgb_array")
-    # env = RecordVideo(
-    #     env, video_folder="intersection_ppo/videos", episode_trigger=lambda e: True
-    # )
-    # env.unwrapped.set_record_video_wrapper(env)
+    env = gym.make("intersection-multi-agent-v1", render_mode="rgb_array")
+    env = TupleToMultiDiscreteWrapper(env)
+    env = RecordVideo(
+        env, video_folder="intersection_ppo/videos", episode_trigger=lambda e: True
+    )
+    env.unwrapped.set_record_video_wrapper(env)
 
     for video in range(10):
         done = truncated = False

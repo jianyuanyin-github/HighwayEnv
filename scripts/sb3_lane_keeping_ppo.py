@@ -12,7 +12,7 @@ TRAIN = False
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
-MODEL_TO_LOAD = "model"  # "latest": load newest model, "model": load model.zip, or specific filename like "model_1234567890"
+MODEL_TO_LOAD = "latest"  # "latest": load newest model, "model": load model.zip, or specific filename like "model_1234567890"
 
 if __name__ == "__main__":
     # GPU optimization configuration
@@ -62,13 +62,13 @@ if __name__ == "__main__":
             print(f"Cannot load existing model: {e}")
             print("Creating new model to start training...")
             model = PPO(
-                "MlpPolicy",
+                "MultiInputPolicy",
                 env,
                 policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
                 n_steps=batch_size * 12 // n_envs,
                 batch_size=batch_size,
                 n_epochs=10,
-                learning_rate=5e-4,
+                learning_rate=1e-3,
                 gamma=0.9,
                 verbose=2,
                 device=device,  # Use GPU
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     else:
         print("✓ Creating new model, training from scratch...")
         model = PPO(
-            "MlpPolicy",
+            "MultiInputPolicy",
             env,
             policy_kwargs=dict(net_arch=[dict(pi=[256, 256], vf=[256, 256])]),
             n_steps=batch_size * 12 // n_envs,
@@ -105,7 +105,7 @@ if __name__ == "__main__":
             name_prefix="rl_model",
         )
 
-        model.learn(total_timesteps=int(1e6), callback=checkpoint_callback)
+        model.learn(total_timesteps=int(5e5), callback=checkpoint_callback)
 
         # Save model with timestamp to avoid overwriting
         import time
@@ -152,10 +152,10 @@ if __name__ == "__main__":
         exit(1)
 
     env = gym.make("lane-keeping-v0", render_mode="rgb_array")
-    # env = RecordVideo(
-    #     env, video_folder="lane_keeping_ppo/videos", episode_trigger=lambda e: True
-    # )
-    # env.unwrapped.set_record_video_wrapper(env)
+    env = RecordVideo(
+        env, video_folder="lane_keeping_ppo/videos", episode_trigger=lambda e: True
+    )
+    env.unwrapped.set_record_video_wrapper(env)
 
     for video in range(10):
         done = truncated = False

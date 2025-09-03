@@ -151,12 +151,11 @@ if __name__ == "__main__":
             print(f"  {m}")
         exit(1)
 
-    # Force use new environment config - restart Python will clear cache
     env = gym.make("racetrack-single-v0", render_mode="rgb_array")
-    # env = RecordVideo(
-    #     env, video_folder="racetrack_single_ppo/videos", episode_trigger=lambda e: True
-    # )
-    # env.unwrapped.set_record_video_wrapper(env)
+    env = RecordVideo(
+        env, video_folder="racetrack_single_ppo/videos", episode_trigger=lambda e: True
+    )
+    env.unwrapped.set_record_video_wrapper(env)
 
     for video in range(10):
         done = truncated = False

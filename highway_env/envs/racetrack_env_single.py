@@ -20,7 +20,7 @@ class RacetrackEnvSingle(AbstractEnv):
                 "observation": {
                     "type": "OccupancyGrid",
                     "features": ["presence", "on_road"],
-                    "grid_size": [[-18, 18], [-18, 18]],
+                    "grid_size": [[-30, 30], [-30, 30]],
                     "grid_step": [3, 3],
                     "as_image": False,
                     "align_to_vehicle_axes": True,
@@ -29,19 +29,20 @@ class RacetrackEnvSingle(AbstractEnv):
                     "type": "ContinuousAction",
                     "longitudinal": True,
                     "lateral": True,
-                    "target_speeds": [0, 5, 10],
+                    "dynamical": True,
                 },
                 "simulation_frequency": 15,
-                "policy_frequency": 5,
+                "policy_frequency": 15,
                 "duration": 300,
                 "collision_reward": -1,
                 "lane_centering_cost": 4,
                 "lane_centering_reward": 1,
-                "action_reward": -0.3,
+                "progress_reward": 0.5,
+                "speed_reward": 0.2,
                 "controlled_vehicles": 1,
                 "other_vehicles": 0,
-                "screen_width": 600,
-                "screen_height": 600,
+                "screen_width": 800,
+                "screen_height": 800,
                 "centering_position": [0.5, 0.5],
                 "speed_limit": 10.0,
                 "terminate_off_road": True,
@@ -59,11 +60,26 @@ class RacetrackEnvSingle(AbstractEnv):
         return reward
 
     def _rewards(self, action: np.ndarray) -> dict[str, float]:
+
         _, lateral = self.vehicle.lane.local_coordinates(self.vehicle.position)
+
+        longitudinal_speed = self.vehicle.speed * np.cos(
+            self.vehicle.heading
+            - self.vehicle.lane.heading_at(
+                self.vehicle.lane.local_coordinates(self.vehicle.position)[0]
+            )
+        )
+        progress_reward = max(0, longitudinal_speed)
+
+        target_speed = self.vehicle.lane.speed_limit * 0.8
+        speed_diff = abs(self.vehicle.speed - target_speed)
+        speed_reward = max(0, 1 - speed_diff / target_speed)
+
         return {
             "lane_centering_reward": 1
             / (1 + self.config["lane_centering_cost"] * lateral**2),
-            "action_reward": np.linalg.norm(action),
+            "progress_reward": progress_reward,
+            "speed_reward": speed_reward,
             "collision_reward": self.vehicle.crashed,
             "on_road_reward": self.vehicle.on_road,
         }
@@ -364,12 +380,13 @@ class RacetrackEnvSingle(AbstractEnv):
         self.controlled_vehicles = []
         for i in range(self.config["controlled_vehicles"]):
             lane_index = (
-                ("a", "b", 0)
-                if i == 0
-                else self.road.network.random_lane_index(rng)
+                ("a", "b", 0) if i == 0 else self.road.network.random_lane_index(rng)
             )
             controlled_vehicle = self.action_type.vehicle_class.make_on_lane(
-                self.road, lane_index, speed=None, longitudinal=rng.uniform(20, 50)
+                self.road,
+                lane_index,
+                speed=None,
+                longitudinal=rng.uniform(30, 80),  # 从(20, 50)调整到(30, 80)
             )
 
             self.controlled_vehicles.append(controlled_vehicle)
