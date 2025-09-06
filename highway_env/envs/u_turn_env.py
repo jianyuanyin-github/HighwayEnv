@@ -24,7 +24,7 @@ class UTurnEnv(AbstractEnv):
                 "action": {"type": "DiscreteMetaAction", "target_speeds": [8, 16, 24]},
                 "screen_width": 789,
                 "screen_height": 289,
-                "duration": 10,
+                "duration": 50,
                 "collision_reward": -1.0,  # Penalization received for vehicle collision.
                 "left_lane_reward": 0.1,  # Reward received for maintaining left most lane.
                 "high_speed_reward": 0.4,  # Reward received for maintaining cruising speed.
