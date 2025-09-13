@@ -4,11 +4,12 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.utils import get_linear_fn
 
 import highway_env  # noqa: F401
 
 
-TRAIN = False
+TRAIN = True
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
@@ -68,7 +69,8 @@ if __name__ == "__main__":
                 n_steps=batch_size * 12 // n_envs,
                 batch_size=batch_size,
                 n_epochs=10,
-                learning_rate=1e-3,
+                # learning_rate=get_linear_fn(1e-3, 1e-5, 0.1),
+                learning_rate=5e-4,
                 gamma=0.9,
                 verbose=2,
                 device=device,  # Use GPU
@@ -83,6 +85,7 @@ if __name__ == "__main__":
             n_steps=batch_size * 12 // n_envs,
             batch_size=batch_size,
             n_epochs=10,
+            # learning_rate=get_linear_fn(1e-3, 1e-5, 0.1),
             learning_rate=5e-4,
             gamma=0.9,
             verbose=2,

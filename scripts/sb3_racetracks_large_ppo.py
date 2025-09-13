@@ -8,7 +8,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 import highway_env  # noqa: F401
 
 
-TRAIN = False
+TRAIN = True
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )

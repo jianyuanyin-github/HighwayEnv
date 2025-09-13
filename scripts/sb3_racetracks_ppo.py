@@ -19,27 +19,28 @@ if __name__ == "__main__":
     import torch
     import signal
     import sys
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    
+
     # Global variable to store model for signal handler
     current_model = None
-    
+
     def signal_handler(signum, frame):
-        print(f"\n\n⚠️  Received signal {signum} (Ctrl+C)")
+        print(f"\n\n Received signal {signum} (Ctrl+C)")
         if current_model is not None:
-            print("💾 Saving current model before exit...")
+            print(" Saving current model before exit...")
             import time
+
             timestamp = int(time.time())
             emergency_save_path = f"racetrack_ppo/model_emergency_{timestamp}"
             current_model.save(emergency_save_path)
-            print(f"✅ Model saved as: {emergency_save_path}.zip")
+            print(f" Model saved as: {emergency_save_path}.zip")
         else:
-            print("❌ No model to save")
-        print("🔚 Exiting...")
+            print(" No model to save")
+        print("Exiting...")
         sys.exit(0)
-    
+
     # Register signal handler for Ctrl+C
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -90,8 +91,10 @@ if __name__ == "__main__":
     if TRAIN:
         # Store model reference for signal handler (before training starts)
         current_model = model
-        print("Signal handlers registered - Press Ctrl+C to save and exit during training")
-        
+        print(
+            "Signal handlers registered - Press Ctrl+C to save and exit during training"
+        )
+
         # Save checkpoint every 100,000 steps
         checkpoint_callback = CheckpointCallback(
             save_freq=100000,
@@ -100,9 +103,10 @@ if __name__ == "__main__":
         )
 
         model.learn(total_timesteps=int(1e5), callback=checkpoint_callback)
-        
+
         # Save model with timestamp to avoid overwriting
         import time
+
         timestamp = int(time.time())
         model_name = f"racetrack_ppo/model_{timestamp}"
         model.save(model_name)
@@ -111,7 +115,7 @@ if __name__ == "__main__":
 
     # Run the algorithm - load model based on configuration
     import glob
-    
+
     if MODEL_TO_LOAD == "latest":
         # Load the newest timestamped model
         model_files = glob.glob("racetrack_ppo/model_*.zip")
@@ -133,7 +137,7 @@ if __name__ == "__main__":
         else:
             model_path = f"racetrack_ppo/{MODEL_TO_LOAD}"
         print(f"Loading specified model: {model_path}")
-    
+
     try:
         model = PPO.load(model_path, env=env)
     except FileNotFoundError:
