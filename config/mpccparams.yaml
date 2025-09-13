@@ -1,0 +1,42 @@
+
+N: 35 # horizon steps
+Tsim: 10.0 # simulation time [s]
+Tf: 1.0 # horizon length [s]
+Qc: 1000.0 # cost for contouring error
+Ql:  1000.0 # lag error cost
+Q_theta: 5 # advancing parameter reward
+R_a: 0.01
+R_delta: 0.01
+
+#solverparameters for boxconstraints.
+jerk_min : -8.0 #min change in a [m/s^3] jerk
+jerk_max : 6.0  #max change in a [m/s^3] jerk
+
+a_min : -2.5 #min a [m/s^2] acceleration
+a_max : 3.5 #max a [m/s^2] acceleration
+
+delta_min : -0.610865   # minimum steering angle [rad]
+delta_max : 0.610865  # maximum steering angle [rad]
+
+deltadot_min : -0.322 # minimum steering angle cahgne[rad/s]
+deltadot_max : 0.322 # maximum steering angle cahgne[rad/s]
+
+omega_min : -100 # minimum yawrate [rad/sec]
+omega_max : 100 # maximum yawrate [rad/sec]
+
+thetadot_min : 0.1  # minimum adv param speed [m/s]
+thetadot_max : 35 # maximum adv param speed [m/s]
+
+theta_min : 0.00  # minimum adv param [m]
+theta_max : 1345 # maximum adv param  [m] - should match track smax
+
+phi_min : 0.0     # minimum heading angle [rad] = 0
+phi_max : 6.28318  # maximum heading angle [rad] = 2*pi
+
+vx_max : 30 # max long vel [m/s]
+vx_min : -0.5 #0.05 # min long vel [m/s]
+
+vy_max : 3.5 # max lat vel [m/s]
+vy_min : -3.5 # min lat vel [m/s]
+
+generate_solver : false # if true, generate solver code

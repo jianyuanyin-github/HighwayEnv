@@ -1,0 +1,26 @@
+
+m: 2520 #[kg] - typical car mass
+lf: 1.484 #[m] - front axle distance
+lr: 1.644 #[m] - rear axle distance  
+l: 3.128 #[m] # lf + lr - wheelbase
+Iz: 13600 #[kg*m^2] - yaw moment of inertia
+
+#pajecka and motor coefficients
+Bf: 10
+Br: 10
+Cf: 1.2
+Cr: 1.6
+Df: 15591.427
+Dr: 24629.523
+
+#otherparameters
+ro : 1.225 #[kg/m^3] # air density
+s : 2.9 #[m^2] # frontal area
+Cd: 0.35 # drag coefficient
+fr0 : 0.009         # friction coefficient factors
+fr1 : 0.002         # friction coefficient factors
+fr4 : 0.0003        # friction coefficient factors
+
+# vehicle shape parameters
+veh_length: 4.973        
+veh_width: 1.194     
