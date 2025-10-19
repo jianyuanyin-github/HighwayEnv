@@ -38,6 +38,12 @@ class MPCC:
         self.track_lu_table = track["track_lu_table"]
         self.ppm = track.get("ppm", 100)  # points per meter, default 100 for backward compatibility
 
+        # DRL-MPCC Integration parameters (optional, set by SafetyAwareDRLMPCC)
+        self.u_ref = None  # (a_ref, delta_ref) from DRL policy
+        self.omega_weights = None  # Time-decaying weights ω(t_k)
+        self.K_ref = None  # Reference tracking weights [K_a, K_delta]
+        self.beta = 1.0  # Overall weight for reference tracking
+
         self.solver = forces_pro_setting(
             mpccparams, vehicleparams, self.generate_solver
         )

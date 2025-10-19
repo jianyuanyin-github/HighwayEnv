@@ -1,0 +1,42 @@
+identifier: 'rc_car_bo'
+
+# flags
+do_boundary_sampling: False
+do_random_sampling: True
+do_bayesian_optimization: True
+save_trials: True
+
+# number of processes/CPU cores to occupy
+n_processes: 4
+# number of iterations
+n_initial: 50           # Increased initial random sampling
+n_bayesian_optimization: 200  # Increased BO iterations
+# batch size (number of trials evaluated simultaneously)
+batch_size: 5
+
+# constraint thresholds (adapted for RC car)
+max_lat_dev: 0.5
+max_a_comb: 2.0
+
+# reference points for hypervolume calculation
+reference_point_0: [-0.3, -0.5]
+reference_point_1: [-0.2, -0.6]
+
+# parameters for acquisition function optimization
+n_sobol_samples: 512
+n_restarts: 10
+n_raw_samples: 256
+max_iter: 200
+epsilon: 0.8                # exploration factor, gives weight to mean vs. std
+
+# parameter bounds (adapted for RC car MPCC parameters)
+parameters: ["Qc", "Ql", "Q_theta", "R_d", "R_delta"]
+parameter_bounds:
+  Qc: [100, 2000]         # contouring error weight
+  Ql: [500, 3000]         # lag error weight  
+  Q_theta: [1, 50]        # progress reward weight
+  R_d: [0.001, 0.1]       # throttle change weight
+  R_delta: [0.001, 0.1]   # steering change weight
+
+# reference point for hypervolume calculation
+reference_point: [10.0, 1.0]  # [lap_time, tracking_error] 

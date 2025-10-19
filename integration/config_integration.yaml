@@ -1,0 +1,84 @@
+# DRL-MPCC Integration Configuration
+
+# ============================================================================
+# CONTROL MODE SELECTION
+# ============================================================================
+control_mode: "drl_mpcc"  # Options: "pure_mpcc", "drl_mpcc"
+# - "pure_mpcc": Standard MPCC without DRL (uses original solver)
+# - "drl_mpcc": DRL feedforward + MPCC safety layer (uses DRL-enabled solver)
+
+# ============================================================================
+# DRL-MPCC INTEGRATION PARAMETERS
+# ============================================================================
+integration:
+  # Time decay rate for ω(t) = exp(-α·t_k)
+  # Higher α → faster decay → MPCC dominates sooner in horizon
+  alpha: 0.1
+
+  # Overall weight for reference tracking term
+  # β = 0: Pure MPCC (ignore DRL reference)
+  # β = 1: Full reference tracking enabled
+  beta: 0.9
+
+  # Reference tracking weights K = diag([K_a, K_delta])
+  K_a: 1.0       # Weight for acceleration tracking
+  K_delta: 1.0   # Weight for steering tracking
+
+# ============================================================================
+# DRL POLICY SETTINGS
+# ============================================================================
+drl_policy:
+  # Path to trained DRL model (PPO) - latest model (70% success, better action diversity)
+  model_path: "racetrack_single_ppo/model_1760367700.zip"
+
+  # Policy output type
+  # "continuous": Direct (a, δ) output
+  # "discrete": Action index → parameter set
+  output_type: "continuous"
+
+  # Action space bounds (for continuous)
+  action_bounds:
+    a_min: -5.0
+    a_max: 5.0
+    delta_min: -0.785398  # -45 degrees
+    delta_max: 0.785398   # +45 degrees
+
+# ============================================================================
+# SOLVER CONFIGURATION
+# ============================================================================
+solver:
+  # Whether to generate new solver or load existing
+  generate_solver: false  # Set to true first time only!
+
+  # Solver directory
+  # - Pure MPCC: "./dynamics_solver_forcespro"
+  # - DRL-MPCC: "./dynamics_solver_forcespro_drl"
+  solver_dir_pure: "./dynamics_solver_forcespro"
+  solver_dir_drl: "./dynamics_solver_forcespro_drl"
+
+# ============================================================================
+# LOGGING AND VISUALIZATION
+# ============================================================================
+logging:
+  # Enable tracking error logging
+  log_tracking_error: true
+
+  # Save trajectory comparison plots
+  save_plots: true
+
+  # Plot output directory
+  plot_dir: "integration/results/"
+
+  # Log frequency (steps)
+  log_frequency: 10
+
+# ============================================================================
+# SAFETY OVERRIDE PARAMETERS
+# ============================================================================
+safety:
+  # Maximum allowed tracking error before reverting to pure MPCC
+  max_tracking_error_a: 3.0  # m/s^2
+  max_tracking_error_delta: 0.5  # rad
+
+  # Emergency mode: If DRL gives unsafe commands, override with pure MPCC
+  enable_safety_override: true

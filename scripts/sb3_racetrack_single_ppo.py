@@ -9,7 +9,7 @@ from stable_baselines3.common.utils import get_linear_fn
 import highway_env  # noqa: F401
 
 
-TRAIN = True
+TRAIN = True  # True: train the model, False: only run the model
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
@@ -108,7 +108,7 @@ if __name__ == "__main__":
             name_prefix="rl_model",
         )
 
-        model.learn(total_timesteps=int(5e5), callback=checkpoint_callback)
+        model.learn(total_timesteps=int(1e6), callback=checkpoint_callback)
 
         # Save model with timestamp to avoid overwriting
         import time

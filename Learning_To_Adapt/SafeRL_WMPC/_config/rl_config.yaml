@@ -1,0 +1,42 @@
+identifier: 'rc_car_rl'
+note: 'Reinforcement Learning for RC Car MPCC'
+
+# GENERAL ENVIRONMENT SETTINGS
+actions_file: null  # Will use default parameter sets if null
+n_mpc_steps: 10
+max_lat_dev: 0.2
+episode_length: 100    
+n_environments: 1  # Use single environment for testing
+n_eval_episodes: 5
+n_envs_eval: 1
+evaluation_frequency: 5_000
+target_velocity: 1.5
+trajectories: ["slider", "test"]
+
+# TRAINING SETTINGS
+n_training_steps: 5_000              # Further reduced for testing
+use_adaptive_learning_rate: false
+learning_rate: 0.0003                 # Standard learning rate
+n_steps: 256
+batch_size: 1024                      # Reduced batch size
+n_epochs: 5
+clip_range: 0.2
+ent_coef: 0.01
+gae_lambda: 0.95
+gamma: 0.99
+max_grad_norm: 0.5
+vf_coef: 0.5
+net_arch: [64, 64]                    # Simplified network
+checkpoint_freq: 5_000
+model_dir: 'Learning_To_Adapt/SafeRL_WMPC/_models'
+log_dir: 'Learning_To_Adapt/SafeRL_WMPC/_logs'
+
+# REWARD SETTINGS
+rew_sigmas:       [0.1, 0.3]          # reward bell width
+rew_lims_lat_dev: [0.0, 0.2]          # normalization limits lateral deviation
+rew_lims_vel_dev: [0.0, 0.5]          # normalization limits velocity deviation
+
+# OBSERVATION SETTINGS
+obs_anticipation_horizon: 20          # furthest reference point to be sampled
+obs_n_anticipation_points: 8          # number of sample points
+n_obs_stack: 1                        # observation stack length 
