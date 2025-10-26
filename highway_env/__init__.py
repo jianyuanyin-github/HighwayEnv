@@ -132,5 +132,17 @@ def _register_highway_envs():
         entry_point="highway_env.envs.racetrack_env_single:RacetrackEnvSingle",
     )
 
+    # racetrack_env_single_pursuit.py (Pure Pursuit version)
+    register(
+        id="racetrack-single-pursuit-v0",
+        entry_point="highway_env.envs.racetrack_env_single_pursuit:RacetrackEnvSinglePursuit",
+    )
+
+    # racetrack_env_complex.py (loadTrack_03 format)
+    register(
+        id="racetrack-complex-v0",
+        entry_point="highway_env.envs.racetrack_env_complex:RacetrackEnvComplex",
+    )
+
 
 _register_highway_envs()

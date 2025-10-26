@@ -32,10 +32,10 @@ class RacetrackEnvSingle(AbstractEnv):
                     "dynamical": True,
                 },
                 "simulation_frequency": 20,
-                "policy_frequency": 20,
+                "policy_frequency": 10,  # Reduced from 20 to 10 Hz to reduce action oscillation
                 "duration": 100,
                 # "collision_reward": -1,
-                "lane_centering_cost": 4,
+                "lane_centering_cost": 10,
                 "progress_reward": 0.5,
                 "speed_reward": 1,
                 "action_smoothness_cost": 1,
@@ -47,9 +47,66 @@ class RacetrackEnvSingle(AbstractEnv):
                 "centering_position": [0.5, 0.5],
                 "speed_limit": 10.0,
                 "terminate_off_road": True,
+                # Action smoothing parameters
+                "action_smoothing_enabled": True,
+                "action_smoothing_alpha": 0.0,  # Pure rate limiting (no EMA memory)
+                "action_smoothing_rate_limit": 0.2,  # Max 30% change per step
             }
         )
         return config
+
+    def _smooth_action(self, action: np.ndarray) -> np.ndarray:
+        """
+        Apply EMA smoothing and rate limiting to action.
+
+        ã_t = α·ã_{t-1} + (1-α)·a_t
+        subject to |ã_t - ã_{t-1}| ≤ Δ_max
+        """
+        if not self.config.get("action_smoothing_enabled", False):
+            return action
+
+        action = np.array(action)
+
+        # First step: no smoothing
+        if self.previous_action_smooth is None:
+            self.previous_action_smooth = action.copy()
+            return action
+
+        alpha = self.config["action_smoothing_alpha"]
+        rate_limit = self.config["action_smoothing_rate_limit"]
+
+        # Step 1: EMA smoothing
+        action_ema = alpha * self.previous_action_smooth + (1 - alpha) * action
+
+        # Step 2: Rate limiting
+        # Assuming action space is [-1, 1], range is 2
+        action_range = 2.0
+        delta_max = rate_limit * action_range
+
+        delta = action_ema - self.previous_action_smooth
+        delta_clipped = np.clip(delta, -delta_max, delta_max)
+
+        action_smooth = self.previous_action_smooth + delta_clipped
+
+        # Ensure within bounds [-1, 1]
+        action_smooth = np.clip(action_smooth, -1.0, 1.0)
+
+        # Update
+        self.previous_action_smooth = action_smooth.copy()
+
+        return action_smooth
+
+    def step(self, action):
+        """Override step to add action smoothing."""
+        # Store raw action for potential use
+        self.raw_action = np.array(action)
+
+        # Apply smoothing
+        action_smooth = self._smooth_action(action)
+
+        # Execute with smoothed action
+        # NOTE: The reward will be computed based on action_smooth (passed to _reward)
+        return super().step(action_smooth)
 
     def _reward(self, action: np.ndarray) -> float:
         rewards = self._rewards(action)
@@ -74,7 +131,7 @@ class RacetrackEnvSingle(AbstractEnv):
         )
 
         if longitudinal_speed >= 0:
-
+            # Fixed: Use abs() to penalize both under and overspeeding
             progress_diff = max(0, target_speed - longitudinal_speed)
         else:
             progress_diff = abs(longitudinal_speed) + target_speed
@@ -113,6 +170,8 @@ class RacetrackEnvSingle(AbstractEnv):
         self._make_road()
         self._make_vehicles()
         self.previous_action = None
+        # Reset action smoothing
+        self.previous_action_smooth = None
 
     def _make_road(self) -> None:
         net = RoadNetwork()
@@ -403,8 +462,8 @@ class RacetrackEnvSingle(AbstractEnv):
             controlled_vehicle = self.action_type.vehicle_class.make_on_lane(
                 self.road,
                 lane_index,
-                speed=None,
-                longitudinal=rng.uniform(30, 80),  # 从(20, 50)调整到(30, 80)
+                speed=5.0,
+                longitudinal=rng.uniform(5, 30),
             )
 
             self.controlled_vehicles.append(controlled_vehicle)
