@@ -131,9 +131,7 @@ class MPCC:
         iter = 80
 
         # initialize dyamics simulation
-        self.dynamics = dynamics_simulator(
-            self.vehicleparams, xinit=xinit, dt=0.02, nodes=4
-        )
+        self.dynamics = dynamics_simulator(self.vehicleparams, xinit, self.dt, nodes=4)
 
         self.zinit = np.concatenate([np.array([0, 0, 0]), xinit])
         self.z_current = np.tile(self.zinit, (self.N, 1))

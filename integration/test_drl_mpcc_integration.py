@@ -13,13 +13,14 @@ import gymnasium as gym
 import highway_env
 import yaml
 import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
+
+matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import sys
 import os
 
 # Add paths
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from integration.mpcc_drl_wrapper import MPCCDRLWrapper
 from integration.drl_mpcc_integration import SafetyAwareDRLMPCC
@@ -28,24 +29,31 @@ import tracks.InterpolateTrack as InterpolateTrack
 
 def load_config(config_path="integration/config_integration.yaml"):
     """Load integration configuration."""
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     return config
 
 
-def extract_track_from_env(env_name="racetrack-single-v0"):
+def extract_track_from_env(env_name="racetrack-single-v0", track_name="rl_single"):
     """Extract track waypoints from highway_env environment."""
     print(f"\n=== Extracting Track from {env_name} ===")
 
     env = gym.make(env_name)
     obs, info = env.reset()
 
-    # Extract waypoints
+    # Extract waypoints - automatically detect lane sequence
     road_network = env.unwrapped.road.network
-    lane_sequence = [
-        ("a", "b", 0), ("b", "c", 0), ("c", "d", 0), ("d", "e", 0),
-        ("e", "f", 0), ("f", "g", 0), ("g", "h", 0), ("h", "i", 0), ("i", "a", 0)
-    ]
+    all_lanes = list(road_network.graph.keys())
+
+    # Build lane sequence dynamically
+    lane_sequence = []
+    for start_node in all_lanes:
+        next_nodes = list(road_network.graph[start_node].keys())
+        if next_nodes:
+            end_node = next_nodes[0]
+            lane_sequence.append((start_node, end_node, 0))
+
+    print(f"Detected {len(lane_sequence)} lane segments")
 
     waypoints = []
     samples_per_lane = 15
@@ -53,7 +61,9 @@ def extract_track_from_env(env_name="racetrack-single-v0"):
     for lane_id in lane_sequence:
         lane = road_network.get_lane(lane_id)
         for i in range(samples_per_lane):
-            longitudinal = i * lane.length / (samples_per_lane - 1) if samples_per_lane > 1 else 0
+            longitudinal = (
+                i * lane.length / (samples_per_lane - 1) if samples_per_lane > 1 else 0
+            )
             position = lane.position(longitudinal, 0)
             waypoints.append([position[0], position[1]])
 
@@ -65,20 +75,21 @@ def extract_track_from_env(env_name="racetrack-single-v0"):
         distances = np.sqrt(np.sum(diff**2, axis=1))
         keep_indices = [0]
         for i in range(1, len(waypoints)):
-            if distances[i-1] > 0.8:
+            if distances[i - 1] > 0.8:
                 keep_indices.append(i)
         waypoints = waypoints[keep_indices]
 
     print(f"Extracted {len(waypoints)} waypoints")
 
     # Save track
-    track_name = "rl_single"
     csv_path = f"tracks/{track_name}.csv"
     np.savetxt(csv_path, waypoints, delimiter=", ", fmt="%.15e")
 
     # Generate lookup table
     r = 2.5
-    track_lu_table, smax = InterpolateTrack.generatelookuptable(f"tracks/{track_name}", r)
+    track_lu_table, smax = InterpolateTrack.generatelookuptable(
+        f"tracks/{track_name}", r
+    )
 
     env.close()
 
@@ -98,11 +109,21 @@ def run_pure_mpcc(track, vehicleparams, mpccparams, startidx, vx0, Nsim):
         Tsim=mpccparams["Tsim"],
         vehicleparams=vehicleparams,
         mpccparams=mpcc_params_copy,
-        control_mode="pure_mpcc"
+        control_mode="pure_mpcc",
     )
 
     # Initial state
-    trackvars = ["sval", "tval", "xtrack", "ytrack", "phitrack", "cos(phi)", "sin(phi)", "g_upper", "g_lower"]
+    trackvars = [
+        "sval",
+        "tval",
+        "xtrack",
+        "ytrack",
+        "phitrack",
+        "cos(phi)",
+        "sin(phi)",
+        "g_upper",
+        "g_lower",
+    ]
     track_lu_table = track["track_lu_table"]
 
     xt0 = track_lu_table[startidx, trackvars.index("xtrack")]
@@ -131,12 +152,24 @@ def run_pure_mpcc(track, vehicleparams, mpccparams, startidx, vx0, Nsim):
     return np.array(trajectory), mpcc
 
 
-def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, vx0, Nsim):
+def run_drl_mpcc_integrated(
+    track, vehicleparams, mpccparams, config, startidx, vx0, Nsim, env_name=None
+):
     """Run DRL-MPCC integrated controller."""
     print("\n=== Running DRL-MPCC Integrated Mode ===")
 
     # Initial state for MPCC
-    trackvars = ["sval", "tval", "xtrack", "ytrack", "phitrack", "cos(phi)", "sin(phi)", "g_upper", "g_lower"]
+    trackvars = [
+        "sval",
+        "tval",
+        "xtrack",
+        "ytrack",
+        "phitrack",
+        "cos(phi)",
+        "sin(phi)",
+        "g_upper",
+        "g_lower",
+    ]
     track_lu_table = track["track_lu_table"]
 
     xt0 = track_lu_table[startidx, trackvars.index("xtrack")]
@@ -146,10 +179,14 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
 
     xinit = np.array([xt0, yt0, phit0, vx0, 0.0, 0, 0, 0, theta_hat0])
 
-    print(f"Initial position: ({xt0:.2f}, {yt0:.2f}), heading: {phit0:.4f} rad, speed: {vx0:.2f} m/s")
+    print(
+        f"Initial position: ({xt0:.2f}, {yt0:.2f}), heading: {phit0:.4f} rad, speed: {vx0:.2f} m/s"
+    )
 
     # Create highway_env environment and set initial state to match MPCC
-    env = gym.make("racetrack-single-v0")
+    if env_name is None:
+        env_name = config["drl_policy"]["tracks"][config["track"]]["env_name"]
+    env = gym.make(env_name)
     obs, info = env.reset()
 
     # Manually set highway_env vehicle to match MPCC initial state
@@ -158,24 +195,28 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
     env.unwrapped.vehicle.speed = vx0
 
     print(f"Highway-env observation shape: {obs.shape}")
-    print(f"Highway-env vehicle initial pos: ({env.unwrapped.vehicle.position[0]:.2f}, {env.unwrapped.vehicle.position[1]:.2f})")
+    print(
+        f"Highway-env vehicle initial pos: ({env.unwrapped.vehicle.position[0]:.2f}, {env.unwrapped.vehicle.position[1]:.2f})"
+    )
 
     # Create DRL-enabled MPCC controller
     mpcc_params_copy = mpccparams.copy()
-    mpcc_params_copy["generate_solver"] = config['solver']['generate_solver']
+    mpcc_params_copy["generate_solver"] = config["solver"]["generate_solver"]
 
     mpcc = MPCCDRLWrapper(
         track=track,
         Tsim=mpccparams["Tsim"],
         vehicleparams=vehicleparams,
         mpccparams=mpcc_params_copy,
-        control_mode="drl_mpcc"
+        control_mode="drl_mpcc",
     )
 
     # Load trained DRL policy
-    drl_model_path = config['drl_policy']['model_path']
+    selected_track = config["track"]
+    drl_model_path = config["drl_policy"]["model_paths"][selected_track]
     try:
         from stable_baselines3 import PPO
+
         print(f"Loading DRL policy from: {drl_model_path}")
         drl_policy = PPO.load(drl_model_path)
         print("✓ DRL policy loaded successfully")
@@ -185,14 +226,14 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
         drl_policy = None
 
     # Create integrated controller
-    integration_config = config['integration']
+    integration_config = config["integration"]
     integrated_ctrl = SafetyAwareDRLMPCC(
         mpcc_controller=mpcc,
         drl_policy=drl_policy,  # Use loaded DRL policy
-        alpha=integration_config['alpha'],
-        beta=integration_config['beta'],
-        K_a=integration_config['K_a'],
-        K_delta=integration_config['K_delta']
+        alpha=integration_config["alpha"],
+        beta=integration_config["beta"],
+        K_a=integration_config["K_a"],
+        K_delta=integration_config["K_delta"],
     )
 
     # Initialize MPCC
@@ -206,16 +247,22 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
         # Get DRL action for current observation
         if use_drl_policy:
             action, _ = drl_policy.predict(obs, deterministic=True)
-            # Map to physical units for MPCC reference
-            a_ref = 5.0 * float(action[0])
-            delta_ref = (np.pi / 4) * float(action[1])
-            u_ref = (a_ref, delta_ref)
         else:
-            action = np.array([0.0, 0.0])
-            u_ref = (0.0, 0.0)
+            action = (
+                0
+                if isinstance(env.action_space, gym.spaces.Discrete)
+                else np.array([0.0, 0.0])
+            )
 
         # Let DRL control the highway_env vehicle
         obs, reward, done, truncated, info = env.step(action)
+
+        # Extract actual control commands from vehicle after step
+        # This handles both discrete and continuous action spaces correctly
+        vehicle = env.unwrapped.vehicle
+        a_ref = vehicle.action.get("acceleration", 0.0)
+        delta_ref = vehicle.action.get("steering", 0.0)
+        u_ref = (a_ref, delta_ref)
 
         if done or truncated:
             obs, info = env.reset()
@@ -225,7 +272,9 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
         omega_weights = integrated_ctrl.compute_reference_weights()
         integrated_ctrl.mpcc.u_ref = u_ref
         integrated_ctrl.mpcc.omega_weights = omega_weights
-        integrated_ctrl.mpcc.K_ref = np.array([integrated_ctrl.K_a, integrated_ctrl.K_delta])
+        integrated_ctrl.mpcc.K_ref = np.array(
+            [integrated_ctrl.K_a, integrated_ctrl.K_delta]
+        )
         integrated_ctrl.mpcc.beta = integrated_ctrl.beta
 
         # Store for tracking error
@@ -240,12 +289,12 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
         integrated_ctrl.u_actual_history.append([a_actual, delta_actual])
 
         result = {
-            'z_current': z_current,
-            'u_ref': u_ref,
-            'u_actual': (a_actual, delta_actual)
+            "z_current": z_current,
+            "u_ref": u_ref,
+            "u_actual": (a_actual, delta_actual),
         }
 
-        z_current = result['z_current']
+        z_current = result["z_current"]
         ego_pos = z_current[0, 3:5]
         trajectory.append(ego_pos.copy())
 
@@ -256,8 +305,10 @@ def run_drl_mpcc_integrated(track, vehicleparams, mpccparams, config, startidx, 
             env_x = env.unwrapped.vehicle.position[0]
             env_y = env.unwrapped.vehicle.position[1]
             env_speed = env.unwrapped.vehicle.speed
-            a_ref, delta_ref = result['u_ref']
-            print(f"  Step {simidx:3d}: MPCC speed={speed:.2f} m/s, pos=({mpcc_x:.1f},{mpcc_y:.1f}) | Env speed={env_speed:.2f} m/s, pos=({env_x:.1f},{env_y:.1f}) | u_ref=({a_ref:.2f}, {delta_ref:.4f})")
+            a_ref, delta_ref = result["u_ref"]
+            print(
+                f"  Step {simidx:3d}: MPCC speed={speed:.2f} m/s, pos=({mpcc_x:.1f},{mpcc_y:.1f}) | Env speed={env_speed:.2f} m/s, pos=({env_x:.1f},{env_y:.1f}) | u_ref=({a_ref:.2f}, {delta_ref:.4f})"
+            )
 
     print("DRL-MPCC integrated simulation completed!")
 
@@ -277,36 +328,66 @@ def plot_comparison(track, traj_pure, traj_drl):
     """Plot trajectory comparison."""
     print("\n=== Generating Comparison Plot ===")
 
-    trackvars = ["sval", "tval", "xtrack", "ytrack", "phitrack", "cos(phi)", "sin(phi)", "g_upper", "g_lower"]
+    trackvars = [
+        "sval",
+        "tval",
+        "xtrack",
+        "ytrack",
+        "phitrack",
+        "cos(phi)",
+        "sin(phi)",
+        "g_upper",
+        "g_lower",
+    ]
     track_lu_table = track["track_lu_table"]
 
     plt.figure(figsize=(14, 10))
 
     # Plot track
-    plt.plot(track_lu_table[:, trackvars.index("xtrack")],
-             track_lu_table[:, trackvars.index("ytrack")],
-             'k--', linewidth=2, alpha=0.5, label='Reference Track')
+    plt.plot(
+        track_lu_table[:, trackvars.index("xtrack")],
+        track_lu_table[:, trackvars.index("ytrack")],
+        "k--",
+        linewidth=2,
+        alpha=0.5,
+        label="Reference Track",
+    )
 
     # Plot pure MPCC
-    plt.plot(traj_pure[:, 0], traj_pure[:, 1],
-             'b-', linewidth=2, label='Pure MPCC', alpha=0.7)
-    plt.plot(traj_pure[0, 0], traj_pure[0, 1],
-             'go', markersize=10, label='Start')
+    plt.plot(
+        traj_pure[:, 0],
+        traj_pure[:, 1],
+        "b-",
+        linewidth=2,
+        label="Pure MPCC",
+        alpha=0.7,
+    )
+    plt.plot(traj_pure[0, 0], traj_pure[0, 1], "go", markersize=10, label="Start")
 
     # Plot DRL-MPCC
-    plt.plot(traj_drl[:, 0], traj_drl[:, 1],
-             'r-', linewidth=2, label='DRL-MPCC Integrated', alpha=0.7)
+    plt.plot(
+        traj_drl[:, 0],
+        traj_drl[:, 1],
+        "r-",
+        linewidth=2,
+        label="DRL-MPCC Integrated",
+        alpha=0.7,
+    )
 
-    plt.axis('equal')
+    plt.axis("equal")
     plt.grid(True, alpha=0.3)
-    plt.xlabel('X [m]', fontsize=12)
-    plt.ylabel('Y [m]', fontsize=12)
-    plt.title('DRL-MPCC Integration: Trajectory Comparison', fontsize=14, fontweight='bold')
+    plt.xlabel("X [m]", fontsize=12)
+    plt.ylabel("Y [m]", fontsize=12)
+    plt.title(
+        "DRL-MPCC Integration: Trajectory Comparison", fontsize=14, fontweight="bold"
+    )
     plt.legend(fontsize=11)
 
     # Save plot
-    os.makedirs('integration/results', exist_ok=True)
-    plt.savefig('integration/results/trajectory_comparison.png', dpi=150, bbox_inches='tight')
+    os.makedirs("integration/results", exist_ok=True)
+    plt.savefig(
+        "integration/results/trajectory_comparison.png", dpi=150, bbox_inches="tight"
+    )
     print("Plot saved to: integration/results/trajectory_comparison.png")
     plt.close()
 
@@ -319,7 +400,16 @@ def main():
 
     # Load configuration
     config = load_config()
-    print(f"\nControl Mode: {config['control_mode']}")
+    selected_track = config["track"]
+    print(f"\nSelected Track: {selected_track}")
+    print(f"Control Mode: {config['control_mode']}")
+
+    # Get track-specific configuration
+    track_config = config["drl_policy"]["tracks"][selected_track]
+    env_name = track_config["env_name"]
+    track_name = track_config["track_name"]
+    print(f"Environment: {env_name}")
+    print(f"Track Name: {track_name}")
 
     # Load parameters
     with open("config/vehicleparams.yaml") as f:
@@ -329,19 +419,14 @@ def main():
         mpccparams = yaml.load(f, Loader=yaml.FullLoader)
 
     # Extract track
-    track_name, track_lu_table, smax, r = extract_track_from_env()
+    track_name, track_lu_table, smax, r = extract_track_from_env(env_name, track_name)
 
     # Load track params
     with open(f"tracks/{track_name}_params.yaml") as f:
         track_params = yaml.load(f, Loader=yaml.FullLoader)
     ppm = track_params["ppm"]
 
-    track = {
-        "track_lu_table": track_lu_table,
-        "smax": smax,
-        "r": r,
-        "ppm": ppm
-    }
+    track = {"track_lu_table": track_lu_table, "smax": smax, "r": r, "ppm": ppm}
 
     # Simulation parameters
     startidx = 10
@@ -349,10 +434,12 @@ def main():
     Nsim = 800  # Increased for longer simulation (covers more of the track)
 
     # Run both modes
-    traj_pure, mpcc_pure = run_pure_mpcc(track, vehicleparams, mpccparams, startidx, vx0, Nsim)
+    traj_pure, mpcc_pure = run_pure_mpcc(
+        track, vehicleparams, mpccparams, startidx, vx0, Nsim
+    )
 
     traj_drl, mpcc_drl, integrated_ctrl = run_drl_mpcc_integrated(
-        track, vehicleparams, mpccparams, config, startidx, vx0, Nsim
+        track, vehicleparams, mpccparams, config, startidx, vx0, Nsim, env_name=env_name
     )
 
     # Compare results

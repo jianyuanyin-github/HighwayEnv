@@ -72,12 +72,13 @@ class SafetyAwareDRLMPCC:
         """
         return np.exp(-self.alpha * t)
 
-    def get_drl_reference(self, obs: np.ndarray) -> Tuple[float, float]:
+    def get_drl_reference(self, obs: np.ndarray, env=None) -> Tuple[float, float]:
         """
         Query DRL policy for reference control.
 
         Args:
             obs: Current observation/state
+            env: highway_env environment (to extract actual control commands)
 
         Returns:
             (a_ref, delta_ref): Reference acceleration [m/s²] and steering angle [rad]
@@ -86,16 +87,22 @@ class SafetyAwareDRLMPCC:
             # No DRL policy available, return zero reference
             return 0.0, 0.0
 
-        # Get action from DRL policy (normalized to [-1, 1])
-        # PPO trained with highway_env outputs actions in normalized space
+        # Get action from DRL policy
         action, _ = self.drl_policy.predict(obs, deterministic=True)
 
-        # Map from normalized action space to physical units
-        # highway_env's ContinuousAction uses:
-        #   - ACCELERATION_RANGE = (-5, 5) m/s²
-        #   - STEERING_RANGE = (-π/4, π/4) rad
-        a_ref = 5.0 * float(action[0])              # [-1,1] → [-5,5] m/s²
-        delta_ref = (np.pi / 4) * float(action[1])  # [-1,1] → [-π/4,π/4] rad
+        if env is not None:
+            # Use highway_env's action system to convert action to control commands
+            # This handles both discrete and continuous action spaces correctly
+            env.unwrapped.action_type.act(action)
+            vehicle = env.unwrapped.vehicle
+
+            # Extract actual acceleration and steering from vehicle
+            a_ref = vehicle.action.get('acceleration', 0.0)
+            delta_ref = vehicle.action.get('steering', 0.0)
+        else:
+            # Fallback: assume continuous action space
+            a_ref = 5.0 * float(action[0]) if hasattr(action, '__len__') else 0.0
+            delta_ref = (np.pi / 4) * float(action[1]) if hasattr(action, '__len__') and len(action) > 1 else 0.0
 
         return a_ref, delta_ref
 

@@ -1,6 +1,13 @@
 # DRL-MPCC Integration Configuration
 
 # ============================================================================
+# TRACK SELECTION
+# ============================================================================
+track: "complex"  # Options: "single", "complex"
+# - "single": Original single track (racetrack-single-v0)
+# - "complex": New complex track (racetrack-complex-v0)
+
+# ============================================================================
 # CONTROL MODE SELECTION
 # ============================================================================
 control_mode: "drl_mpcc"  # Options: "pure_mpcc", "drl_mpcc"
@@ -21,15 +28,28 @@ integration:
   beta: 0.9
 
   # Reference tracking weights K = diag([K_a, K_delta])
-  K_a: 1.0       # Weight for acceleration tracking
-  K_delta: 1.0   # Weight for steering tracking
+  K_a: 10.0       # Weight for acceleration tracking
+  K_delta: 10.0   # Weight for steering tracking
 
 # ============================================================================
 # DRL POLICY SETTINGS
 # ============================================================================
 drl_policy:
-  # Path to trained DRL model (PPO) - latest model (70% success, better action diversity)
-  model_path: "racetrack_single_ppo/model_1760367700.zip"
+  # Model paths for different tracks
+  model_paths:
+    single: "racetrack_single_ppo/model_1760367700.zip"
+    complex: "racetrack_complex_ppo/model_1761569800.zip"
+
+  # Track-specific configurations
+  tracks:
+    single:
+      env_name: "racetrack-single-v0"
+      track_name: "rl_single"
+      segments: 9
+    complex:
+      env_name: "racetrack-complex-v0"
+      track_name: "rl_complex"
+      segments: 20
 
   # Policy output type
   # "continuous": Direct (a, δ) output
@@ -38,7 +58,7 @@ drl_policy:
 
   # Action space bounds (for continuous)
   action_bounds:
-    a_min: -5.0
+    a_min: -7.0
     a_max: 5.0
     delta_min: -0.785398  # -45 degrees
     delta_max: 0.785398   # +45 degrees

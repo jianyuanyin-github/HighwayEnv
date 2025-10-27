@@ -1,4 +1,4 @@
-trackname : "test_111"
+trackname : "rl_single"
 r : 3  # trackwidth[m]
 startidx : 0 # start index in track
 vx0 : 5 # initial long velocity [m/s]

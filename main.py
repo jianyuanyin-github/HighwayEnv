@@ -97,6 +97,8 @@ def main():
     vx0 = simulationparams["vx0"]
     xvars = ["posx", "posy", "phi", "vx", "vy", "omega", "a", "delta", "theta"]
     xinit = np.array([xt0, yt0, phit0, vx0, 0.0, 0, 0, 0, theta_hat0])
+    # ---- [0, 2π]  ----
+    xinit[2] = np.mod(xinit[2], 2 * np.pi)
 
     # static obstacle - temporarily disabled
     # ob_idx = simulationparams["ob_idx"]
