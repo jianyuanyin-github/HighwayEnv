@@ -26,13 +26,14 @@ class RacetrackEnvComplex(AbstractEnv):
                     "align_to_vehicle_axes": True,
                 },
                 "action": {
-                    "type": "ContinuousAction",
+                    "type": "DiscreteMetaAction",
                     "longitudinal": True,
-                    "lateral": True,
-                    "dynamical": True,
+                    "lateral": False,  # Stanley handles lane centering automatically
+                    "use_fine_grained_speed": True,  # 5 actions: MUCH_SLOWER, SLOWER, IDLE, FASTER, MUCH_FASTER
+                    "dynamic": False,
                 },
                 "simulation_frequency": 20,
-                "policy_frequency": 10,  # Reduced from 20 to 10 Hz to reduce action oscillation
+                "policy_frequency": 10,  # Must be <= simulation_frequency
                 "duration": 100,
                 # "collision_reward": -1,
                 "lane_centering_cost": 10,
@@ -45,12 +46,18 @@ class RacetrackEnvComplex(AbstractEnv):
                 "screen_width": 800,
                 "screen_height": 800,
                 "centering_position": [0.5, 0.5],
-                "speed_limit": 10.0,
+                "speed_limit": 30.0,
+                "initial_speed": 15.0,  # Initial speed for controlled vehicle [m/s] - agent must learn to accelerate
                 "terminate_off_road": True,
-                # Action smoothing parameters
-                "action_smoothing_enabled": True,
-                "action_smoothing_alpha": 0.0,  # Pure rate limiting (no EMA memory)
-                "action_smoothing_rate_limit": 0.2,  # Max 30% change per step
+                # Controller configuration
+                "use_stanley_controller": False,  # Use default Pure Pursuit controller (Stanley has issues)
+                "use_pi_speed_controller": True,  # Use PI for longitudinal control
+                # Action smoothing parameters (disabled for discrete actions)
+                "action_smoothing_enabled": False,
+                "action_smoothing_alpha": 0.0,
+                "action_smoothing_rate_limit": 0.2,
+                # Background color (RGB tuple)
+                "background_color": (255, 255, 255),  # White background
             }
         )
         return config
@@ -110,50 +117,40 @@ class RacetrackEnvComplex(AbstractEnv):
 
     def _reward(self, action: np.ndarray) -> float:
         rewards = self._rewards(action)
-        reward = sum(reward for reward in rewards.values())
-        reward = utils.lmap(reward, [0, 5], [0, 1])
+        # speed_tracking_reward is already in [0, 1]
+        reward = rewards["speed_tracking_reward"]
+        # Apply binary masks for collision and off-road
         reward *= rewards["on_road_reward"]
         reward *= rewards["collision_reward"]
         return reward
 
-    def _rewards(self, action: np.ndarray) -> dict[str, float]:
+    def _rewards(self, action: int) -> dict[str, float]:
+        """
+        Reward function for discrete meta-action with Stanley controller.
 
-        _, lateral = self.vehicle.lane.local_coordinates(self.vehicle.position)
+        Focus on longitudinal speed tracking only, as Stanley handles lateral control.
+        """
+        # Get target speed from current lane
+        target_speed = self.vehicle.lane.speed_limit
 
-        target_speed = self.vehicle.lane.speed_limit * 0.95
-        # speed_diff = abs(self.vehicle.speed - target_speed)
-
-        longitudinal_speed = self.vehicle.speed * np.cos(
-            self.vehicle.heading
-            - self.vehicle.lane.heading_at(
-                self.vehicle.lane.local_coordinates(self.vehicle.position)[0]
+        # Strictly penalize reverse driving and overspeeding
+        if self.vehicle.speed < 0:
+            speed_tracking_reward = 0.0  # Zero reward for going backwards
+        elif self.vehicle.speed > target_speed:
+            # Penalize overspeeding more heavily (2x penalty) to prevent off-road
+            speed_error = self.vehicle.speed - target_speed
+            speed_tracking_reward = 1 / (
+                1 + 2.0 * self.config["progress_cost"] * speed_error**2
             )
-        )
-
-        if longitudinal_speed >= 0:
-            # Fixed: Use abs() to penalize both under and overspeeding
-            progress_diff = max(0, target_speed - longitudinal_speed)
         else:
-            progress_diff = abs(longitudinal_speed) + target_speed
-
-        progress_reward = 1 / (1 + self.config["progress_cost"] * progress_diff**2)
-
-        action_smoothness_reward = 1.0  # first step
-        if self.previous_action is not None:
-            action_diff = np.linalg.norm(action - self.previous_action)
-            action_smoothness_reward = 1 / (
-                1 + self.config["action_smoothness_cost"] * action_diff**2
+            # Normal penalty for underspeeding
+            speed_error = target_speed - self.vehicle.speed
+            speed_tracking_reward = 1 / (
+                1 + self.config["progress_cost"] * speed_error**2
             )
-
-        # update
-        self.previous_action = action.copy()
 
         return {
-            "lane_centering_reward": 1
-            / (1 + self.config["lane_centering_cost"] * lateral**2),
-            # "speed_reward": 1 / (1 + self.config["speed_reward"] * speed_diff**2),
-            "progress_reward": progress_reward,
-            "action_smoothness_reward": action_smoothness_reward,
+            "speed_tracking_reward": speed_tracking_reward,
             "collision_reward": not self.vehicle.crashed,
             "on_road_reward": self.vehicle.on_road,
         }
@@ -178,28 +175,28 @@ class RacetrackEnvComplex(AbstractEnv):
         """Load track definition in simplified format."""
         x0 = np.array([0, 0]).reshape(-1, 1)  # Starting position
         th0 = 0  # Starting angle
-        w = 12  # Track width
+        w = 18  # Track width (increased from 12 to 18m for better lateral margin)
         trackdata = [
-            ['s', 14 * 3],      # Straight: 42m
-            ['c', [15 * 3, -90]],   # Curve: radius 45, right turn 90°
-            ['s', 5 * 3],       # Straight: 15m
-            ['c', [4 * 3, 90]],     # Curve: radius 12, left turn 90°
-            ['c', [4 * 3, -90]],    # Curve: radius 12, right turn 90°
-            ['s', 5 * 3],       # Straight: 15m
-            ['c', [3.5 * 3, -90]],  # Curve: radius 10.5, right turn 90°
-            ['s', 16 * 3],      # Straight: 48m
-            ['c', [3.5 * 3, -120]], # Curve: radius 10.5, right turn 120°
-            ['s', 10 * 3],      # Straight: 30m
-            ['c', [10 * 3, 120]],   # Curve: radius 30, left turn 120°
-            ['s', 10 * 3],      # Straight: 30m
-            ['c', [5 * 3, 90]],     # Curve: radius 15, left turn 90°
-            ['s', 5 * 3],       # Straight: 15m
-            ['c', [5 * 3, 90]],     # Curve: radius 15, left turn 90°
-            ['c', [7 * 3, -180]],   # Curve: radius 21, right turn 180°
-            ['s', 2.3 * 3],     # Straight: 6.9m
-            ['c', [10 * 3, -90]],   # Curve: radius 30, right turn 90°
-            ['s', 14.6 * 3],    # Straight: 43.8m
-            ['c', [12 * 3, -90]]    # Curve: radius 36, right turn 90°
+            ["s", 14 * 3],  # Straight: 42m
+            ["c", [15 * 3, -90]],  # Curve: radius 45, right turn 90°
+            ["s", 5 * 3],  # Straight: 15m
+            ["c", [4 * 3, 90]],  # Curve: radius 12, left turn 90°
+            ["c", [4 * 3, -90]],  # Curve: radius 12, right turn 90°
+            ["s", 5 * 3],  # Straight: 15m
+            ["c", [3.5 * 3, -90]],  # Curve: radius 10.5, right turn 90°
+            ["s", 16 * 3],  # Straight: 48m
+            ["c", [3.5 * 3, -120]],  # Curve: radius 10.5, right turn 120°
+            ["s", 10 * 3],  # Straight: 30m
+            ["c", [10 * 3, 120]],  # Curve: radius 30, left turn 120°
+            ["s", 10 * 3],  # Straight: 30m
+            ["c", [5 * 3, 90]],  # Curve: radius 15, left turn 90°
+            ["s", 5 * 3],  # Straight: 15m
+            ["c", [5 * 3, 90]],  # Curve: radius 15, left turn 90°
+            ["c", [7 * 3, -180]],  # Curve: radius 21, right turn 180°
+            ["s", 2.3 * 3],  # Straight: 6.9m
+            ["c", [10 * 3, -90]],  # Curve: radius 30, right turn 90°
+            ["s", 14.6 * 3],  # Straight: 43.8m
+            ["c", [12 * 3, -90]],  # Curve: radius 36, right turn 90°
         ]
         return trackdata, x0, th0, w
 
@@ -216,35 +213,37 @@ class RacetrackEnvComplex(AbstractEnv):
 
         def A_z(th):
             """Rotation matrix for angle th."""
-            return np.array([[np.cos(th), -np.sin(th)],
-                            [np.sin(th), np.cos(th)]])
+            return np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
 
         A_IV = A_z(th0)  # Current direction matrix
 
-        # Track adaptive speed limits based on segment type
+        # Track adaptive speed limits based on curvature
+        # Using sqrt formula: v_ref(κ) = v_free * √(κ_0 / (|κ| + κ_0))
+        # where κ_0 ≈ a_y,max / v_free²
+        v_free = self.config["speed_limit"]  # Free speed on straights
+        a_y_max = 6.0  # Maximum lateral acceleration [m/s²]
+        kappa_0 = a_y_max / (v_free**2)  # Reference curvature
+
         segment_speed_limits = []
         for segment in trackdata:
-            if segment[0] == 's':  # Straight
-                segment_speed_limits.append(12.0)
-            elif segment[0] == 'c':  # Curve
+            if segment[0] == "s":  # Straight section
+                segment_speed_limits.append(v_free)
+            elif segment[0] == "c":  # Curved section
                 radius = segment[1][0]
-                # Lower speed for tighter curves
-                if radius < 15:
-                    segment_speed_limits.append(8.0)
-                elif radius < 25:
-                    segment_speed_limits.append(9.0)
-                else:
-                    segment_speed_limits.append(10.0)
+                kappa = 1.0 / radius  # Curvature κ = 1/R
+                # v_ref(κ) = v_free * √(κ_0 / (|κ| + κ_0))
+                v_ref = v_free * np.sqrt(kappa_0 / (abs(kappa) + kappa_0))
+                segment_speed_limits.append(v_ref)
 
         # Generate lanes from trackdata
         for idx, segment in enumerate(trackdata):
             # Generate lane names
-            start_node = chr(ord('a') + idx)
-            end_node = chr(ord('a') + (idx + 1) % len(trackdata))
+            start_node = chr(ord("a") + idx)
+            end_node = chr(ord("a") + (idx + 1) % len(trackdata))
 
             speed_limit = segment_speed_limits[idx]
 
-            if segment[0] == 's':  # Straight segment
+            if segment[0] == "s":  # Straight segment
                 dist = segment[1]
 
                 # Start and end positions
@@ -263,48 +262,40 @@ class RacetrackEnvComplex(AbstractEnv):
                 # Update position (following original algorithm)
                 r_IV = r_IV + dist * A_IV[:, 0].reshape(-1, 1)
 
-            elif segment[0] == 'c':  # Circular segment
+            elif segment[0] == "c":  # Circular segment
                 rad = segment[1][0]  # radius
                 ang = np.deg2rad(segment[1][1])  # angle in radians
 
                 # Generate arc in local frame, then transform to global
-
-
-                if ang > 0:  # Left turn (counter-clockwise)
-                    # In local frame: generate arc from 0 to ang
-                    # After rotation, center is at (0, rad) in local frame
-                    arc_end_local = rad * np.array([[np.cos(ang)], [np.sin(ang)]])
-                    # Apply the transformation matrix from original code
-                    A_local = np.array([[0, 1], [-1, 0]])
-                    center_offset_local = np.array([[0], [rad]])
-                    track_end_local = A_local @ arc_end_local + center_offset_local
-
-                    # Center in global frame
+                if ang > 0:  # Left turn
+                    # Center is to the left (positive y in local frame)
                     center_local = np.array([[0], [rad]])
                     center_global = A_IV @ center_local + r_IV
 
-                    # Angles in global frame
-                    start_angle = th0_current - np.pi/2
+                    # For left turn: travel clockwise along the arc
+                    start_angle = th0_current - np.pi / 2
                     end_angle = start_angle + ang
-                    clockwise = False
+                    clockwise = True  # Clockwise along arc for left turn
 
-                else:  # Right turn (clockwise)
-                    # In local frame: generate arc from 0 to ang (negative)
-                    # After rotation, center is at (0, -rad) in local frame
+                    # Local endpoint calculation
                     arc_end_local = rad * np.array([[np.cos(ang)], [np.sin(ang)]])
-                    # Apply the transformation matrix from original code
-                    A_local = np.array([[0, -1], [1, 0]])
-                    center_offset_local = np.array([[0], [-rad]])
-                    track_end_local = A_local @ arc_end_local + center_offset_local
+                    A_local = np.array([[0, 1], [-1, 0]])
+                    track_end_local = A_local @ arc_end_local + center_local
 
-                    # Center in global frame
+                else:  # Right turn
+                    # Center is to the right (negative y in local frame)
                     center_local = np.array([[0], [-rad]])
                     center_global = A_IV @ center_local + r_IV
 
-                    # Angles in global frame
-                    start_angle = th0_current + np.pi/2
+                    # For right turn: travel counter-clockwise along the arc
+                    start_angle = th0_current + np.pi / 2
                     end_angle = start_angle + ang
-                    clockwise = True
+                    clockwise = False  # Counter-clockwise along arc for right turn
+
+                    # Local endpoint calculation
+                    arc_end_local = rad * np.array([[np.cos(ang)], [np.sin(ang)]])
+                    A_local = np.array([[0, -1], [1, 0]])
+                    track_end_local = A_local @ arc_end_local + center_local
 
                 lane = CircularLane(
                     center_global.flatten().tolist(),
@@ -318,7 +309,7 @@ class RacetrackEnvComplex(AbstractEnv):
                 )
                 net.add_lane(start_node, end_node, lane)
 
-                # Update position FIRST using old A_IV 
+                # Update position FIRST using old A_IV
                 r_IV = A_IV @ track_end_local + r_IV
 
                 # Then update heading and direction matrix
@@ -349,9 +340,15 @@ class RacetrackEnvComplex(AbstractEnv):
             controlled_vehicle = self.action_type.vehicle_class.make_on_lane(
                 self.road,
                 lane_index,
-                speed=5.0,
+                speed=self.config["initial_speed"],
                 longitudinal=rng.uniform(5, 30),
             )
+
+            # Configure controllers
+            if hasattr(controlled_vehicle, "USE_STANLEY"):
+                controlled_vehicle.USE_STANLEY = self.config["use_stanley_controller"]
+            if hasattr(controlled_vehicle, "USE_PI_SPEED"):
+                controlled_vehicle.USE_PI_SPEED = self.config["use_pi_speed_controller"]
 
             self.controlled_vehicles.append(controlled_vehicle)
             self.road.vehicles.append(controlled_vehicle)

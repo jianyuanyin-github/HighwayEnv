@@ -8,7 +8,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 import highway_env  # noqa: F401
 
 
-TRAIN = True  # True: train the model, False: only run the model
+TRAIN = False  # True: train the model, False: only run the model
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     def signal_handler(signum, frame):
         print(f"\n\n⚠️  Received signal {signum} (Ctrl+C)")
         if current_model is not None:
-            print("💾 Saving current model before exit...")
+            print("Saving current model before exit...")
             import time
 
             timestamp = int(time.time())
@@ -71,7 +71,7 @@ if __name__ == "__main__":
                 batch_size=batch_size,
                 n_epochs=10,
                 learning_rate=5e-4,
-                gamma=0.9,
+                gamma=0.95,  # Increased from 0.9 to focus on longer-term rewards (~20 steps / ~1 second)
                 verbose=2,
                 device=device,  # Use GPU
                 tensorboard_log="racetrack_complex_ppo/",
@@ -86,7 +86,7 @@ if __name__ == "__main__":
             batch_size=batch_size,
             n_epochs=10,
             learning_rate=5e-4,
-            gamma=0.9,
+            gamma=0.95,  # Increased from 0.9 to focus on longer-term rewards (~20 steps / ~1 second)
             verbose=2,
             device=device,  # Use GPU
             tensorboard_log="racetrack_complex_ppo/",
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             name_prefix="rl_model",
         )
 
-        model.learn(total_timesteps=int(1e6), callback=checkpoint_callback)
+        model.learn(total_timesteps=int(6e5), callback=checkpoint_callback)
 
         # Save model with timestamp to avoid overwriting
         import time

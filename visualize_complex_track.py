@@ -25,14 +25,14 @@ def visualize_track_layout():
         for end_node in road_network.graph[start_node].keys():
             lanes = road_network.graph[start_node][end_node]
             for lane in lanes:
-                # Sample points along the lane
+                # Sample points along the lane with high density for smoothness
                 if hasattr(lane, 'length'):
-                    # Straight lane
-                    num_points = max(10, int(lane.length / 2))
+                    # Straight lane - sample every 0.5m
+                    num_points = max(20, int(abs(lane.length) / 0.5))
                     s_vals = np.linspace(0, lane.length, num_points)
                 else:
-                    # Circular lane
-                    num_points = 50
+                    # Circular lane - sample every 0.2m for smooth curves
+                    num_points = max(100, int(abs(lane.length) / 0.2))
                     s_vals = np.linspace(0, abs(lane.length), num_points)
 
                 positions = np.array([lane.position(s, 0) for s in s_vals])

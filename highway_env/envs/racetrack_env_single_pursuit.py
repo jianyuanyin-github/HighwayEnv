@@ -30,9 +30,15 @@ class RacetrackEnvSinglePursuit(AbstractEnv):
                 },
                 "action": {
                     "type": "DiscreteMetaAction",
-                    "target_speeds": [7, 9, 10, 12],  # Discrete speed options (increased minimum)
+                    "target_speeds": [
+                        7,
+                        9,
+                        10,
+                        12,
+                    ],  # Discrete speed options (increased minimum)
                     "longitudinal": True,
                     "lateral": True,  # No lane changes (single lane)
+                    "dynamic": True,
                 },
                 "simulation_frequency": 20,
                 "policy_frequency": 10,
@@ -64,6 +70,7 @@ class RacetrackEnvSinglePursuit(AbstractEnv):
 
         # Determine optimal speed based on lane type
         from highway_env.road.lane import CircularLane, StraightLane
+
         lane = self.vehicle.lane
 
         if isinstance(lane, CircularLane):

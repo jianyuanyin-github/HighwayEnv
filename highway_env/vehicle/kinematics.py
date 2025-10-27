@@ -20,6 +20,7 @@ class Vehicle(RoadObject):
 
     LENGTH = 5.0
     """ Vehicle length [m] """
+    WHEELBASE = 3.128
     WIDTH = 2.0
     """ Vehicle width [m] """
     DEFAULT_INITIAL_SPEEDS = [23, 25]
@@ -148,7 +149,7 @@ class Vehicle(RoadObject):
             self.position += self.impact
             self.crashed = True
             self.impact = None
-        self.heading += self.speed * np.sin(beta) / (self.LENGTH / 2) * dt
+        self.heading += self.speed * np.sin(beta) / (self.WHEELBASE / 2) * dt
         self.speed += self.action["acceleration"] * dt
         self.on_state_update()
 
@@ -212,7 +213,7 @@ class Vehicle(RoadObject):
                 else (*last_lane_index[:-1], 0)
             )
             last_lane = self.road.network.get_lane(last_lane_index)
-            return last_lane.position(last_lane.length, 0)
+            return last_lane.position(last_lane.WHEELBASE, 0)
         else:
             return self.position
 

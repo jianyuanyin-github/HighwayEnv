@@ -31,6 +31,17 @@ class ControlledVehicle(Vehicle):
     KP_LATERAL = 1 / TAU_LATERAL  # [1/s]
     MAX_STEERING_ANGLE = np.pi / 3  # [rad]
     DELTA_SPEED = 5  # [m/s]
+    DELTA_SPEED_FINE = 1  # [m/s] for fine-grained control
+    DELTA_SPEED_COARSE = 2  # [m/s] for much faster/slower
+
+    # Stanley controller parameters
+    STANLEY_K = 0.8  # Stanley gain for cross-track error [1/m] - moderate gain to avoid oscillation
+    UNDERSTEER_COEFF = 0.0  # Ku: Understeer coefficient [s^2/m]
+    USE_STANLEY = False  # Whether to use Stanley controller instead of default
+
+    # PI speed controller parameters
+    KI_A = 0.3  # Integral gain for speed control [1/s^2]
+    USE_PI_SPEED = False  # Whether to use PI controller instead of P-only
 
     def __init__(
         self,
@@ -46,6 +57,8 @@ class ControlledVehicle(Vehicle):
         self.target_lane_index = target_lane_index or self.lane_index
         self.target_speed = target_speed or self.speed
         self.route = route
+        # PI controller integral term
+        self.speed_error_integral = 0.0
 
     @classmethod
     def create_from(cls, vehicle: "ControlledVehicle") -> "ControlledVehicle":
@@ -97,9 +110,21 @@ class ControlledVehicle(Vehicle):
         """
         self.follow_road()
         if action == "FASTER":
-            self.target_speed += self.DELTA_SPEED
+            self.target_speed += (
+                self.DELTA_SPEED_FINE
+                if hasattr(self, "DELTA_SPEED_FINE")
+                else self.DELTA_SPEED
+            )
         elif action == "SLOWER":
-            self.target_speed -= self.DELTA_SPEED
+            self.target_speed -= (
+                self.DELTA_SPEED_FINE
+                if hasattr(self, "DELTA_SPEED_FINE")
+                else self.DELTA_SPEED
+            )
+        elif action == "MUCH_FASTER":
+            self.target_speed += self.DELTA_SPEED_COARSE
+        elif action == "MUCH_SLOWER":
+            self.target_speed -= self.DELTA_SPEED_COARSE
         elif action == "LANE_RIGHT":
             _from, _to, _id = self.target_lane_index
             target_lane_index = (
@@ -146,6 +171,20 @@ class ControlledVehicle(Vehicle):
         """
         Steer the vehicle to follow the center of an given lane.
 
+        Dispatches to Stanley or default controller based on USE_STANLEY flag.
+
+        :param target_lane_index: index of the lane to follow
+        :return: a steering wheel angle command [rad]
+        """
+        if self.USE_STANLEY:
+            return self.steering_control_stanley(target_lane_index)
+        else:
+            return self.steering_control_default(target_lane_index)
+
+    def steering_control_default(self, target_lane_index: LaneIndex) -> float:
+        """
+        Default lateral controller (Pure Pursuit + Heading Control).
+
         1. Lateral position is controlled by a proportional controller yielding a lateral speed command
         2. Lateral speed command is converted to a heading reference
         3. Heading is controlled by a proportional controller yielding a heading rate command
@@ -186,16 +225,100 @@ class ControlledVehicle(Vehicle):
         )
         return float(steering_angle)
 
+    def steering_control_stanley(self, target_lane_index: LaneIndex) -> float:
+        """
+        Dynamic Stanley lateral controller with understeer compensation.
+
+        Formula: δ = (L + Ku*v²) * κ_ref + ψ_e + arctan(k*e_y/v)
+        """
+        target_lane = self.road.network.get_lane(target_lane_index)
+        lane_coords = target_lane.local_coordinates(self.position)
+
+        # Get current position on lane
+        longitudinal_pos = lane_coords[0]
+        crosstrack_error = lane_coords[1]  # e_y: lateral deviation from lane center
+
+        # FIX: Use look-ahead point for heading reference (like default controller)
+        # This is CRITICAL in curves to avoid lag
+        look_ahead_distance = (
+            self.speed * self.TAU_PURSUIT
+        )  # Look ahead ~0.1-0.5 seconds
+        look_ahead_pos = longitudinal_pos + look_ahead_distance
+
+        # Get reference path heading at look-ahead position
+        lane_heading = target_lane.heading_at(look_ahead_pos)
+        heading_error = utils.wrap_to_pi(lane_heading - self.heading)  # ψ_e
+
+        # Compute reference path curvature (κ_ref)
+        # Numerical differentiation: κ ≈ dψ/ds
+        ds = 0.1  # small distance for numerical derivative
+        heading_ahead = target_lane.heading_at(longitudinal_pos + ds)
+        heading_behind = target_lane.heading_at(longitudinal_pos - ds)
+        curvature_ref = utils.wrap_to_pi(heading_ahead - heading_behind) / (2 * ds)
+
+        L = getattr(self, "WHEELBASE", getattr(self, "LENGTH", 2.7))
+        Ku = getattr(self, "UNDERSTEER_COEFF", 0.0)  # [s^2/m]
+        L_eff = L + Ku * (self.speed**2)
+        delta_ff = np.arctan(L_eff * curvature_ref)
+        # ---------------------------------------
+
+        # Pure feedback Stanley controller (no feedforward)
+        speed_safe = utils.not_zero(self.speed)
+
+        # Feedback term 1: heading error
+        heading_term = heading_error
+
+        # Feedback term 2: cross-track error (Stanley law)
+        # In curves, reduce crosstrack gain to avoid conflict with heading error
+        if abs(curvature_ref) > 0.02:  # Sharp curve (R < 50m)
+            crosstrack_gain = 0.5 * self.STANLEY_K  # Reduce by half in curves
+        else:
+            crosstrack_gain = self.STANLEY_K
+
+        crosstrack_term = np.arctan(crosstrack_gain * crosstrack_error / speed_safe)
+
+        # Total steering command (ADD feedforward)
+        steering_angle = delta_ff + heading_term + crosstrack_term
+
+        # Clip to physical limits
+        steering_angle = np.clip(
+            steering_angle, -self.MAX_STEERING_ANGLE, self.MAX_STEERING_ANGLE
+        )
+
+        return float(steering_angle)
+
     def speed_control(self, target_speed: float) -> float:
         """
         Control the speed of the vehicle.
 
-        Using a simple proportional controller.
+        Uses PI controller if USE_PI_SPEED is True, otherwise simple P controller.
 
         :param target_speed: the desired speed
         :return: an acceleration command [m/s2]
         """
-        return self.KP_A * (target_speed - self.speed)
+        speed_error = target_speed - self.speed
+
+        if self.USE_PI_SPEED:
+            # PI controller: a = Kp*e + Ki*∫e dt
+            # Update integral (using dt from simulation)
+            dt = 0.05  # Simulation timestep (simulation_frequency=20 Hz)
+            self.speed_error_integral += speed_error * dt
+
+            # Anti-windup: clamp integral term
+            integral_max = 10.0  # Maximum integral contribution
+            self.speed_error_integral = np.clip(
+                self.speed_error_integral, -integral_max, integral_max
+            )
+
+            # PI control law
+            acceleration = (
+                self.KP_A * speed_error + self.KI_A * self.speed_error_integral
+            )
+        else:
+            # P-only controller
+            acceleration = self.KP_A * speed_error
+
+        return acceleration
 
     def get_routes_at_intersection(self) -> List[Route]:
         """Get the list of routes that can be followed at the next intersection."""
@@ -398,3 +521,99 @@ class MDPVehicle(ControlledVehicle):
                 if (t % int(trajectory_timestep / dt)) == 0:
                     states.append(copy.deepcopy(v))
         return states
+
+
+class ControlledBicycleVehicle(ControlledVehicle):
+    """
+    A bicycle dynamics vehicle with high-level discrete control actions.
+
+    Combines BicycleVehicle dynamics with ControlledVehicle's high-level actions.
+    """
+
+    def __init__(
+        self,
+        road: Road,
+        position: Vector,
+        heading: float = 0,
+        speed: float = 0,
+        target_lane_index: LaneIndex = None,
+        target_speed: float = None,
+        route: Route = None,
+    ):
+        # Import here to avoid circular dependency
+        from highway_env.vehicle.dynamics import BicycleVehicle
+
+        # Initialize with BicycleVehicle parameters
+        super(ControlledVehicle, self).__init__(road, position, heading, speed)
+
+        # Add ControlledVehicle attributes
+        self.target_lane_index = target_lane_index or self.lane_index
+        self.target_speed = target_speed or self.speed
+        self.route = route
+        self.speed_error_integral = 0.0
+
+        # Initialize bicycle vehicle dynamics attributes
+        self.lateral_speed = 0
+        self.yaw_rate = 0
+        self.theta = None
+        self.A_lat, self.B_lat = self.lateral_lpv_dynamics()
+
+    # Inherit dynamics-related attributes from BicycleVehicle
+    from highway_env.vehicle.dynamics import BicycleVehicle
+
+    MASS = BicycleVehicle.MASS
+    LENGTH_A = BicycleVehicle.LENGTH_A
+    LENGTH_B = BicycleVehicle.LENGTH_B
+    INERTIA_Z = BicycleVehicle.INERTIA_Z
+    FRICTION_FRONT = BicycleVehicle.FRICTION_FRONT
+    FRICTION_REAR = BicycleVehicle.FRICTION_REAR
+    MAX_ANGULAR_SPEED = BicycleVehicle.MAX_ANGULAR_SPEED
+    MAX_SPEED = BicycleVehicle.MAX_SPEED
+
+    @property
+    def state(self) -> np.ndarray:
+        """State vector for bicycle dynamics."""
+        return np.array(
+            [
+                [self.position[0]],
+                [self.position[1]],
+                [self.heading],
+                [self.speed],
+                [self.lateral_speed],
+                [self.yaw_rate],
+            ]
+        )
+
+    # Import dynamics methods from BicycleVehicle
+    from highway_env.vehicle.dynamics import BicycleVehicle
+
+    derivative_func = BicycleVehicle.derivative_func
+    lateral_lpv_structure = BicycleVehicle.lateral_lpv_structure
+    lateral_lpv_dynamics = BicycleVehicle.lateral_lpv_dynamics
+    full_lateral_lpv_structure = BicycleVehicle.full_lateral_lpv_structure
+    full_lateral_lpv_dynamics = BicycleVehicle.full_lateral_lpv_dynamics
+
+    def step(self, dt: float) -> None:
+        """Use bicycle dynamics for stepping."""
+        from highway_env.vehicle.dynamics import rk4
+
+        self.clip_actions()
+        new_state = rk4(self.derivative_func, self.state, dt=dt)
+        self.position = new_state[0:2, 0]
+        self.heading = new_state[2, 0]
+        self.speed = new_state[3, 0]
+        self.lateral_speed = new_state[4, 0]
+        self.yaw_rate = new_state[5, 0]
+
+        self.on_state_update()
+
+    def clip_actions(self) -> None:
+        """Clip actions for bicycle dynamics."""
+        super().clip_actions()
+        # Required because of the linearisation
+        self.action["steering"] = np.clip(
+            self.action["steering"], -np.pi / 2, np.pi / 2
+        )
+        self.yaw_rate = np.clip(
+            self.yaw_rate, -self.MAX_ANGULAR_SPEED, self.MAX_ANGULAR_SPEED
+        )

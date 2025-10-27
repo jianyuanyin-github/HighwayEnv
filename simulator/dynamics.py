@@ -59,8 +59,10 @@ class dynamics_simulator:
         Fry = Dr * casadi.sin(Cr * casadi.atan(Br * alphar))
 
         # rear longitudinal forces
-        Faero = 0.5 * ro * s * Cd * vx * vx
-        Froll = fr0 + fr1 * vx / 100 + fr4 * (vx / 100**4)
+        # Faero = 0.5 * ro * s * Cd * vx * vx
+        Faero = 0
+        # Froll = fr0 + fr1 * vx / 100 + fr4 * (vx / 100**4)
+        Froll = 0
         Frx = m * a - Froll - Faero
 
         # let z = [u, x] = [jerk, deltadot, thetadot, posx, posy, phi, vx, vy, omega, a, delta, theta]

@@ -8,7 +8,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 import highway_env  # noqa: F401
 
 
-TRAIN = True  # True: train the model, False: only run the model
+TRAIN = False  # True: train the model, False: only run the model
 CONTINUE_TRAINING = (
     False  # True: continue training from existing model, False: train from scratch
 )
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     def signal_handler(signum, frame):
         print(f"\n\n⚠️  Received signal {signum} (Ctrl+C)")
         if current_model is not None:
-            print("💾 Saving current model before exit...")
+            print("Saving current model before exit...")
             import time
 
             timestamp = int(time.time())
@@ -49,7 +49,9 @@ if __name__ == "__main__":
     batch_size = 256  # Increase batch size to utilize GPU better
 
     # Use pursuit environment
-    env = make_vec_env("racetrack-single-pursuit-v0", n_envs=n_envs, vec_env_cls=SubprocVecEnv)
+    env = make_vec_env(
+        "racetrack-single-pursuit-v0", n_envs=n_envs, vec_env_cls=SubprocVecEnv
+    )
 
     # Decide whether to continue training based on configuration
     if CONTINUE_TRAINING:

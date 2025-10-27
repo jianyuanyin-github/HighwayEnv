@@ -249,7 +249,7 @@ class LaneGraphics:
             if abs(starts[k] - ends[k]) > 0.5 * cls.STRIPE_LENGTH:
                 pygame.draw.line(
                     surface,
-                    surface.WHITE,
+                    surface.BLACK,
                     (surface.vec2pix(lane.position(starts[k], lats[k]))),
                     (surface.vec2pix(lane.position(ends[k], lats[k]))),
                     max(surface.pix(cls.STRIPE_WIDTH), 1),
@@ -300,7 +300,7 @@ class RoadGraphics:
         :param road: the road to be displayed
         :param surface: the pygame surface
         """
-        surface.fill(surface.GREY)
+        surface.fill(surface.WHITE)
         for _from in road.network.graph.keys():
             for _to in road.network.graph[_from].keys():
                 for l in road.network.graph[_from][_to]:

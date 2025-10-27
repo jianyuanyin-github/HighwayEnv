@@ -207,6 +207,9 @@ class DiscreteMetaAction(ActionType):
     ACTIONS_LONGI = {0: "SLOWER", 1: "IDLE", 2: "FASTER"}
     """A mapping of longitudinal action indexes to labels."""
 
+    ACTIONS_LONGI_FINE = {0: "MUCH_SLOWER", 1: "SLOWER", 2: "IDLE", 3: "FASTER", 4: "MUCH_FASTER"}
+    """A mapping of fine-grained longitudinal action indexes to labels with IDLE."""
+
     ACTIONS_LAT = {0: "LANE_LEFT", 1: "IDLE", 2: "LANE_RIGHT"}
     """A mapping of lateral action indexes to labels."""
 
@@ -216,6 +219,7 @@ class DiscreteMetaAction(ActionType):
         longitudinal: bool = True,
         lateral: bool = True,
         target_speeds: Vector | None = None,
+        use_fine_grained_speed: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -225,24 +229,31 @@ class DiscreteMetaAction(ActionType):
         :param longitudinal: include longitudinal actions
         :param lateral: include lateral actions
         :param target_speeds: the list of speeds the vehicle is able to track
+        :param use_fine_grained_speed: use fine-grained speed control (±1, ±2 m/s) instead of MDP speed levels
         """
         super().__init__(env)
         self.longitudinal = longitudinal
         self.lateral = lateral
+        self.use_fine_grained_speed = use_fine_grained_speed
         self.target_speeds = (
             np.array(target_speeds)
             if target_speeds is not None
             else MDPVehicle.DEFAULT_TARGET_SPEEDS
         )
-        self.actions = (
-            self.ACTIONS_ALL
-            if longitudinal and lateral
-            else (
-                self.ACTIONS_LONGI
-                if longitudinal
-                else self.ACTIONS_LAT if lateral else None
+
+        # Select action set based on fine-grained flag
+        if use_fine_grained_speed and longitudinal and not lateral:
+            self.actions = self.ACTIONS_LONGI_FINE
+        else:
+            self.actions = (
+                self.ACTIONS_ALL
+                if longitudinal and lateral
+                else (
+                    self.ACTIONS_LONGI
+                    if longitudinal
+                    else self.ACTIONS_LAT if lateral else None
+                )
             )
-        )
         if self.actions is None:
             raise ValueError(
                 "At least longitudinal or lateral actions must be included"
@@ -254,7 +265,12 @@ class DiscreteMetaAction(ActionType):
 
     @property
     def vehicle_class(self) -> Callable:
-        return functools.partial(MDPVehicle, target_speeds=self.target_speeds)
+        if self.use_fine_grained_speed:
+            # Use ControlledVehicle (kinematic model)
+            from highway_env.vehicle.controller import ControlledVehicle
+            return ControlledVehicle
+        else:
+            return functools.partial(MDPVehicle, target_speeds=self.target_speeds)
 
     def act(self, action: int | np.ndarray) -> None:
         self.controlled_vehicle.act(self.actions[int(action)])

@@ -25,6 +25,7 @@ class MPCC:
         self.Tf = mpccparams["Tf"]
         self.N = mpccparams["N"]
         self.Nsim = int(np.floor(self.N / self.Tf * Tsim))
+        self.dt = mpccparams["dt"]
 
         self.Qc = mpccparams["Qc"]
         self.Ql = mpccparams["Ql"]
@@ -36,7 +37,9 @@ class MPCC:
         self.r = track["r"]
         self.smax = track["smax"]
         self.track_lu_table = track["track_lu_table"]
-        self.ppm = track.get("ppm", 100)  # points per meter, default 100 for backward compatibility
+        self.ppm = track.get(
+            "ppm", 100
+        )  # points per meter, default 100 for backward compatibility
 
         # DRL-MPCC Integration parameters (optional, set by SafetyAwareDRLMPCC)
         self.u_ref = None  # (a_ref, delta_ref) from DRL policy
@@ -129,7 +132,7 @@ class MPCC:
 
         # initialize dyamics simulation
         self.dynamics = dynamics_simulator(
-            self.vehicleparams, self.Tf / self.N, xinit, nodes=4
+            self.vehicleparams, xinit=xinit, dt=0.02, nodes=4
         )
 
         self.zinit = np.concatenate([np.array([0, 0, 0]), xinit])
@@ -146,7 +149,9 @@ class MPCC:
         self.z_current[:, self.zvars.index("theta")] = theta_old
         print(f"Initial theta values: {theta_old[:5]}...{theta_old[-5:]}")
         index_lin_points = self.ppm * theta_old
-        index_lin_points = np.clip(index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1)
+        index_lin_points = np.clip(
+            index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1
+        )
         track_lin_points = self.track_lu_table[index_lin_points, :]
 
         # initialize x values on track
@@ -159,7 +164,9 @@ class MPCC:
             all_parameters = []
             # get track linearization
             index_lin_points = self.ppm * theta_old
-            index_lin_points = np.clip(index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1)
+            index_lin_points = np.clip(
+                index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1
+            )
             track_lin_points = self.track_lu_table[index_lin_points, :]
 
             for stageidx in range(self.N):
@@ -245,7 +252,9 @@ class MPCC:
         theta_old = self.theta_current
         # get track linearization
         index_lin_points = self.ppm * theta_old
-        index_lin_points = np.clip(index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1)
+        index_lin_points = np.clip(
+            index_lin_points.astype(np.int32), 0, len(self.track_lu_table) - 1
+        )
         # print("track linearized around entries:", index_lin_points)
         track_lin_points = self.track_lu_table[index_lin_points, :]
 
@@ -333,7 +342,7 @@ class MPCC:
         # simulate dynaics
         u = self.z_current[0, :3]
         xtrue = self.dynamics.tick(u)  # self.z_current[1, 3:] #
-        
+
         # wrap phi angle to keep it in [0, 2π] range
         self.dynamics.wrap_phi()
         xtrue = self.dynamics.x  # get updated state with wrapped phi

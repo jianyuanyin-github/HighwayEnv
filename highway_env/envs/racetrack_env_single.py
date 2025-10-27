@@ -30,6 +30,7 @@ class RacetrackEnvSingle(AbstractEnv):
                     "longitudinal": True,
                     "lateral": True,
                     "dynamical": True,
+                    "acceleration_range": (-7.0, 5.0),
                 },
                 "simulation_frequency": 20,
                 "policy_frequency": 10,  # Reduced from 20 to 10 Hz to reduce action oscillation
@@ -45,7 +46,7 @@ class RacetrackEnvSingle(AbstractEnv):
                 "screen_width": 800,
                 "screen_height": 800,
                 "centering_position": [0.5, 0.5],
-                "speed_limit": 10.0,
+                "speed_limit": 30.0,
                 "terminate_off_road": True,
                 # Action smoothing parameters
                 "action_smoothing_enabled": True,
